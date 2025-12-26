@@ -28,7 +28,6 @@ func NewDocumentViewer(path string) *DocumentViewer {
 	ext := strings.ToLower(filepath.Ext(path))
 	fileType := strings.TrimPrefix(ext, ".")
 
-	// Create temp directory for image files
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("docviewer_%d", time.Now().UnixNano()))
 
 	return &DocumentViewer{
@@ -58,13 +57,11 @@ func (d *DocumentViewer) findContentPages() {
 	for i := 0; i < d.doc.NumPage(); i++ {
 		hasContent := false
 
-		// Check for text content first
 		text, err := d.doc.Text(i)
 		if err == nil && len(strings.Fields(strings.TrimSpace(text))) >= 3 {
 			hasContent = true
 		}
 
-		// If no meaningful text, check if page has meaningful visual content
 		if !hasContent {
 			if d.pageHasVisualContent(i) {
 				hasContent = true
@@ -78,60 +75,48 @@ func (d *DocumentViewer) findContentPages() {
 }
 
 func (d *DocumentViewer) pageHasVisualContent(pageNum int) bool {
-	// Try to render the page as image to check for visual content
 	img, err := d.doc.Image(pageNum)
 	if err != nil {
 		return false
 	}
 
 	bounds := img.Bounds()
-	// Check if image has reasonable dimensions
 	if bounds.Dx() < 50 || bounds.Dy() < 50 {
 		return false
 	}
 
-	// Check if the image is mostly blank/white
 	return d.hasNonBlankContent(img)
 }
 
-// hasNonBlankContent checks if an image has meaningful visual content
-// by sampling pixels and checking for non-white/non-blank content
 func (d *DocumentViewer) hasNonBlankContent(img image.Image) bool {
 	bounds := img.Bounds()
 
-	// Sample configuration
-	sampleRate := 10             // Sample every 10th pixel
-	nonWhiteThreshold := 20      // How many non-white pixels we need to consider it content
-	whiteThreshold := uint8(240) // RGB values above this are considered "white-ish"
+	sampleRate := 10
+	nonWhiteThreshold := 20
+	whiteThreshold := uint8(240)
 
 	nonWhitePixels := 0
 	sampledPixels := 0
 
-	// Sample pixels across the image
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += sampleRate {
 		for x := bounds.Min.X; x < bounds.Max.X; x += sampleRate {
 			sampledPixels++
 
-			// Get pixel color
 			c := img.At(x, y)
 			r, g, b, a := c.RGBA()
 
-			// Convert to 8-bit values
 			r8 := uint8(r >> 8)
 			g8 := uint8(g >> 8)
 			b8 := uint8(b >> 8)
 			a8 := uint8(a >> 8)
 
-			// Skip fully transparent pixels
 			if a8 < 10 {
 				continue
 			}
 
-			// Check if pixel is non-white
 			if r8 < whiteThreshold || g8 < whiteThreshold || b8 < whiteThreshold {
 				nonWhitePixels++
 
-				// Early exit if we found enough content
 				if nonWhitePixels >= nonWhiteThreshold {
 					return true
 				}
@@ -139,34 +124,27 @@ func (d *DocumentViewer) hasNonBlankContent(img image.Image) bool {
 		}
 	}
 
-	// Additional check: look for any significantly colored pixels
-	// This catches pages that might have light gray backgrounds or subtle content
 	colorVariance := d.checkColorVariance(img)
-	if colorVariance > 100 { // Threshold for color variance
+	if colorVariance > 100 {
 		return true
 	}
 
-	// Consider it meaningful content if we have enough non-white pixels
 	return nonWhitePixels >= nonWhiteThreshold
 }
 
-// checkColorVariance calculates the variance in pixel colors to detect subtle content
 func (d *DocumentViewer) checkColorVariance(img image.Image) float64 {
 	bounds := img.Bounds()
 
-	// Sample fewer pixels for variance check
 	sampleRate := 20
 	var rSum, gSum, bSum uint64
 	var rSumSq, gSumSq, bSumSq uint64
 	sampleCount := 0
 
-	// Calculate mean
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += sampleRate {
 		for x := bounds.Min.X; x < bounds.Max.X; x += sampleRate {
 			c := img.At(x, y)
 			r, g, b, a := c.RGBA()
 
-			// Skip transparent pixels
 			if uint8(a>>8) < 10 {
 				continue
 			}
@@ -191,7 +169,6 @@ func (d *DocumentViewer) checkColorVariance(img image.Image) float64 {
 		return 0
 	}
 
-	// Calculate variance
 	rMean := float64(rSum) / float64(sampleCount)
 	gMean := float64(gSum) / float64(sampleCount)
 	bMean := float64(bSum) / float64(sampleCount)
@@ -200,7 +177,6 @@ func (d *DocumentViewer) checkColorVariance(img image.Image) float64 {
 	gVar := float64(gSumSq)/float64(sampleCount) - gMean*gMean
 	bVar := float64(bSumSq)/float64(sampleCount) - bMean*bMean
 
-	// Return combined variance
 	return rVar + gVar + bVar
 }
 
@@ -220,27 +196,18 @@ func (d *DocumentViewer) Run() {
 		return
 	}
 	defer d.restoreTerminal(oldState)
-
-	// Hide cursor
 	fmt.Print("\033[?25l")
 	defer fmt.Print("\033[?25h") // Show cursor on exit
 
 	d.currentPage = 0
-
-	// Main loop - display page and wait for input
 	for {
-		// Display the current page
 		d.displayCurrentPage()
-
-		// Wait for user input - this keeps the page visible
 		char := d.readSingleChar()
 
-		// Handle input and check if we should quit
 		if d.handleInput(char) {
 			break // Exit the loop to quit
 		}
 
-		// Continue loop - next iteration will display the new page
 	}
 
 	// Clear screen before showing exit message
@@ -277,7 +244,6 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 }
 
 func (d *DocumentViewer) handleArrowKeys() {
-	// Read next 2 bytes to see if it's an arrow key
 	buf := make([]byte, 2)
 	n, _ := os.Stdin.Read(buf)
 
