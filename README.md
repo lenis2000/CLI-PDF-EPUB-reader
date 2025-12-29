@@ -49,7 +49,7 @@ cd CLI-PDF-EPUB-reader
 ```
 
 2. Run these commands:
-go mod download
+go mod tidy
 go build -o lnreader
 ```
 
