@@ -47,8 +47,14 @@ func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (st
 
 	pixelsPerChar, pixelsPerLine := d.getTerminalCellSize()
 
-	targetPixelWidth := int(float64(effectiveWidth) * pixelsPerChar)
-	targetPixelHeight := int(float64(effectiveHeight) * pixelsPerLine)
+	// Apply user scale factor
+	scale := d.scaleFactor
+	if scale == 0 {
+		scale = 1.0
+	}
+
+	targetPixelWidth := int(float64(effectiveWidth) * pixelsPerChar * scale)
+	targetPixelHeight := int(float64(effectiveHeight) * pixelsPerLine * scale)
 
 	bounds := img.Bounds()
 	imgWidth := bounds.Dx()

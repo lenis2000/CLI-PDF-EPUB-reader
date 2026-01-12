@@ -23,11 +23,12 @@ type DocumentViewer struct {
 	fileType    string // "pdf" or "epub"
 	tempDir     string // for storing temporary image files
 	forceMode   string // "", "text", or "image" - override auto-detection
-	fitMode      string // "auto", "height", "width"
-	wantBack     bool   // signal to go back to file picker
-	searchQuery  string // current search query
-	searchHits   []int  // pages with matches
-	searchHitIdx int    // current index in searchHits
+	fitMode      string  // "auto", "height", "width"
+	wantBack     bool    // signal to go back to file picker
+	searchQuery  string  // current search query
+	searchHits   []int   // pages with matches
+	searchHitIdx int     // current index in searchHits
+	scaleFactor  float64 // image scale adjustment (1.0 = default)
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -37,11 +38,12 @@ func NewDocumentViewer(path string) *DocumentViewer {
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("docviewer_%d", time.Now().UnixNano()))
 
 	return &DocumentViewer{
-		path:     path,
-		fileType: fileType,
-		reader:   bufio.NewReader(os.Stdin),
-		tempDir:  tempDir,
-		fitMode:  "height", // default: fit to height
+		path:        path,
+		fileType:    fileType,
+		reader:      bufio.NewReader(os.Stdin),
+		tempDir:     tempDir,
+		fitMode:     "height", // default: fit to height
+		scaleFactor: 1.0,
 	}
 }
 
@@ -258,6 +260,16 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 		d.nextSearchHit()
 	case 'N':
 		d.prevSearchHit()
+	case '+', '=':
+		d.scaleFactor += 0.1
+		if d.scaleFactor > 2.0 {
+			d.scaleFactor = 2.0
+		}
+	case '-', '_':
+		d.scaleFactor -= 0.1
+		if d.scaleFactor < 0.5 {
+			d.scaleFactor = 0.5
+		}
 	case 27: // ESC key - could be arrow keys
 		d.handleArrowKeys()
 	}
