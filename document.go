@@ -214,7 +214,7 @@ func (d *DocumentViewer) Run() bool {
 	reloadChan := make(chan bool, 1)
 	stopChan := make(chan bool)
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
