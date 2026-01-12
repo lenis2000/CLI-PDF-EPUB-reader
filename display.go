@@ -196,13 +196,17 @@ func (d *DocumentViewer) displayMixedPage(pageNum, termWidth, termHeight int) {
 func (d *DocumentViewer) displayPageInfo(pageNum, termWidth int, contentType string) {
 	modeIndicator := ""
 	if d.forceMode != "" {
-		modeIndicator = fmt.Sprintf(" [%s mode]", d.forceMode)
+		modeIndicator = fmt.Sprintf(" [%s]", d.forceMode)
+	}
+	fitIndicator := ""
+	if !d.fitToHeight {
+		fitIndicator = " [scroll]"
 	}
 	var pageInfo string
 	if d.fileType == "epub" {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s - EPUB", d.currentPage+1, len(d.textPages), contentType, modeIndicator)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s - EPUB  [b]ack [t]ext/img [f]it [h]elp [q]uit", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator)
 	} else {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s - PDF", d.currentPage+1, len(d.textPages), contentType, modeIndicator)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s - PDF  [b]ack [t]ext/img [f]it [h]elp [q]uit", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator)
 	}
 	if len(pageInfo) > termWidth {
 		pageInfo = pageInfo[:termWidth-3] + "..."
@@ -371,10 +375,12 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println(strings.Repeat("=", termWidth))
 	fmt.Println()
 	fmt.Println("Navigation:")
-	fmt.Println("  j or Space  - Next page/chapter")
-	fmt.Println("  k           - Previous page/chapter")
-	fmt.Println("  g           - Go to specific page/chapter")
+	fmt.Println("  j or Space  - Next page")
+	fmt.Println("  k           - Previous page")
+	fmt.Println("  g           - Go to specific page")
+	fmt.Println("  b           - Back to file list")
 	fmt.Println("  t           - Toggle view mode (auto → text → image)")
+	fmt.Println("  f           - Toggle fit-to-height")
 	fmt.Println("  h           - Show this help")
 	fmt.Println("  q           - Quit")
 	fmt.Println()

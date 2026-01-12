@@ -8,9 +8,6 @@ import (
 )
 
 func main() {
-	var filePath string
-	var err error
-
 	// Determine target: argument or current directory
 	arg := "."
 	if len(os.Args) > 1 {
@@ -30,41 +27,57 @@ func main() {
 		return
 	}
 
-	if info.IsDir() {
-		// It's a directory - search within it
-		filePath, err = selectFileWithPickerInDir(arg)
-		if err != nil {
-			fmt.Printf("File selection cancelled: %v\n", err)
+	// Determine the search directory for "back" functionality
+	searchDir := arg
+	if !info.IsDir() {
+		searchDir = filepath.Dir(arg)
+	}
+
+	// Main loop - allows going back to file picker
+	for {
+		var filePath string
+		var err error
+
+		if info.IsDir() {
+			// It's a directory - search within it
+			filePath, err = selectFileWithPickerInDir(searchDir)
+			if err != nil {
+				fmt.Printf("File selection cancelled: %v\n", err)
+				return
+			}
+		} else {
+			// First time with a file - use directly, then switch to directory mode
+			filePath = arg
+			info = nil // Next iteration will use directory picker
+		}
+
+		if filePath == "" {
 			return
 		}
-	} else {
-		// It's a file - use directly
-		filePath = arg
-	}
 
-	if filePath == "" {
-		fmt.Println("No file selected. Exiting.")
-		return
-	}
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			fmt.Printf("File not found at: %s\n", filePath)
+			return
+		}
 
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		fmt.Printf("File not found at: %s\n", filePath)
-		return
-	}
+		ext := strings.ToLower(filepath.Ext(filePath))
+		if ext != ".pdf" && ext != ".epub" && ext != ".docx" {
+			fmt.Printf("Unsupported file format: %s\nSupported formats: .pdf, .epub, .docx\n", ext)
+			return
+		}
 
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext != ".pdf" && ext != ".epub" && ext != ".docx" {
-		fmt.Printf("Unsupported file format: %s\nSupported formats: .pdf, .epub, .docx\n", ext)
-		return
-	}
+		viewer := NewDocumentViewer(filePath)
+		if err := viewer.Open(); err != nil {
+			fmt.Printf("Error opening file: %v\n", err)
+			return
+		}
 
-	viewer := NewDocumentViewer(filePath)
-	if err := viewer.Open(); err != nil {
-		fmt.Printf("Error opening file: %v\n", err)
-		return
+		wantBack := viewer.Run()
+		if !wantBack {
+			return
+		}
+		// Loop continues - go back to file picker
 	}
-
-	viewer.Run()
 }
 
 func selectFileWithPickerInDir(dir string) (string, error) {

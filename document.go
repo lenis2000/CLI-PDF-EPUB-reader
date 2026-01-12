@@ -23,6 +23,8 @@ type DocumentViewer struct {
 	fileType    string // "pdf" or "epub"
 	tempDir     string // for storing temporary image files
 	forceMode   string // "", "text", or "image" - override auto-detection
+	fitToHeight bool   // fit image to terminal height (no scrolling)
+	wantBack    bool   // signal to go back to file picker
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -32,10 +34,11 @@ func NewDocumentViewer(path string) *DocumentViewer {
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("docviewer_%d", time.Now().UnixNano()))
 
 	return &DocumentViewer{
-		path:     path,
-		fileType: fileType,
-		reader:   bufio.NewReader(os.Stdin),
-		tempDir:  tempDir,
+		path:        path,
+		fileType:    fileType,
+		reader:      bufio.NewReader(os.Stdin),
+		tempDir:     tempDir,
+		fitToHeight: true, // default: fit to height (no scrolling)
 	}
 }
 
@@ -181,14 +184,14 @@ func (d *DocumentViewer) checkColorVariance(img image.Image) float64 {
 	return rVar + gVar + bVar
 }
 
-func (d *DocumentViewer) Run() {
+func (d *DocumentViewer) Run() bool {
 	defer d.doc.Close()
 	defer d.cleanup()
 
 	oldState, err := d.setRawMode()
 	if err != nil {
 		fmt.Printf("Error setting raw mode: %v\n", err)
-		return
+		return false
 	}
 	defer d.restoreTerminal(oldState)
 	fmt.Print("\033[?25l")
@@ -205,9 +208,9 @@ func (d *DocumentViewer) Run() {
 
 	}
 
-	// Clear screen before showing exit message
+	// Clear screen
 	fmt.Print("\033[2J\033[H")
-	fmt.Println("Thanks for reading!")
+	return d.wantBack
 }
 
 func (d *DocumentViewer) cleanup() {
@@ -219,6 +222,9 @@ func (d *DocumentViewer) cleanup() {
 func (d *DocumentViewer) handleInput(c byte) bool {
 	switch c {
 	case 'q':
+		return true
+	case 'b':
+		d.wantBack = true
 		return true
 	case 'j', ' ':
 		if d.currentPage < len(d.textPages)-1 {
@@ -234,6 +240,8 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 		d.showHelp()
 	case 't':
 		d.toggleViewMode()
+	case 'f':
+		d.fitToHeight = !d.fitToHeight
 	case 27: // ESC key - could be arrow keys
 		d.handleArrowKeys()
 	}
