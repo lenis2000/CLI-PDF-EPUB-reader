@@ -267,17 +267,38 @@ func (d *DocumentViewer) checkAndReload() bool {
 	}
 
 	if info.ModTime().After(d.lastModTime) {
-		// File changed - reload
-		savedPage := d.currentPage
-		d.doc.Close()
-
-		// Small delay to ensure file is fully written
-		time.Sleep(100 * time.Millisecond)
-
-		doc, err := fitz.New(d.path)
-		if err != nil {
-			return false
+		// File changed - wait for it to stabilize
+		// Check that file size is stable (not still being written)
+		lastSize := info.Size()
+		for i := 0; i < 5; i++ {
+			time.Sleep(200 * time.Millisecond)
+			newInfo, err := os.Stat(d.path)
+			if err != nil {
+				return false
+			}
+			if newInfo.Size() == lastSize {
+				break // File size stable
+			}
+			lastSize = newInfo.Size()
 		}
+
+		// Try to open the new file (with retries)
+		savedPage := d.currentPage
+		var doc *fitz.Document
+		var openErr error
+		for i := 0; i < 3; i++ {
+			doc, openErr = fitz.New(d.path)
+			if openErr == nil {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		if openErr != nil {
+			return false // Still can't open, skip this reload
+		}
+
+		// Success - close old doc and use new one
+		d.doc.Close()
 		d.doc = doc
 		d.lastModTime = info.ModTime()
 		d.findContentPages()
