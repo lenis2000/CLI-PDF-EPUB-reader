@@ -202,11 +202,19 @@ func (d *DocumentViewer) displayPageInfo(pageNum, termWidth int, contentType str
 	if d.fitMode != "height" {
 		fitIndicator = fmt.Sprintf(" [fit:%s]", d.fitMode)
 	}
+	searchIndicator := ""
+	if d.searchQuery != "" {
+		if len(d.searchHits) > 0 {
+			searchIndicator = fmt.Sprintf(" [/%s: %d/%d]", d.searchQuery, d.searchHitIdx+1, len(d.searchHits))
+		} else {
+			searchIndicator = fmt.Sprintf(" [/%s: no matches]", d.searchQuery)
+		}
+	}
 	var pageInfo string
 	if d.fileType == "epub" {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s - EPUB  [b]ack [t]ext/img [f]it [h]elp [q]uit", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s%s - EPUB", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator, searchIndicator)
 	} else {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s - PDF  [b]ack [t]ext/img [f]it [h]elp [q]uit", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s%s - PDF", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator, searchIndicator)
 	}
 	if len(pageInfo) > termWidth {
 		pageInfo = pageInfo[:termWidth-3] + "..."
@@ -379,8 +387,15 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println("  k           - Previous page")
 	fmt.Println("  g           - Go to specific page")
 	fmt.Println("  b           - Back to file list")
+	fmt.Println()
+	fmt.Println("Search:")
+	fmt.Println("  /           - Search text in document")
+	fmt.Println("  n           - Next search result")
+	fmt.Println("  N           - Previous search result")
+	fmt.Println()
+	fmt.Println("Display:")
 	fmt.Println("  t           - Toggle view mode (auto → text → image)")
-	fmt.Println("  f           - Toggle fit-to-height")
+	fmt.Println("  f           - Toggle fit mode (height → width → auto)")
 	fmt.Println("  h           - Show this help")
 	fmt.Println("  q           - Quit")
 	fmt.Println()

@@ -23,8 +23,11 @@ type DocumentViewer struct {
 	fileType    string // "pdf" or "epub"
 	tempDir     string // for storing temporary image files
 	forceMode   string // "", "text", or "image" - override auto-detection
-	fitMode string // "auto", "height", "width"
-	wantBack    bool   // signal to go back to file picker
+	fitMode      string // "auto", "height", "width"
+	wantBack     bool   // signal to go back to file picker
+	searchQuery  string // current search query
+	searchHits   []int  // pages with matches
+	searchHitIdx int    // current index in searchHits
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -249,10 +252,85 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 		default:
 			d.fitMode = "height"
 		}
+	case '/':
+		d.startSearch()
+	case 'n':
+		d.nextSearchHit()
+	case 'N':
+		d.prevSearchHit()
 	case 27: // ESC key - could be arrow keys
 		d.handleArrowKeys()
 	}
 	return false
+}
+
+func (d *DocumentViewer) startSearch() {
+	d.restoreTerminal(d.oldState)
+	fmt.Print("\033[?25h") // show cursor
+	fmt.Printf("\nSearch: ")
+	line, _ := d.reader.ReadString('\n')
+	query := strings.TrimSpace(line)
+	fmt.Print("\033[?25l") // hide cursor
+	d.setRawMode()
+
+	if query == "" {
+		d.searchQuery = ""
+		d.searchHits = nil
+		return
+	}
+
+	d.searchQuery = strings.ToLower(query)
+	d.searchHits = nil
+	d.searchHitIdx = 0
+
+	// Search all pages
+	for _, pageNum := range d.textPages {
+		text, err := d.doc.Text(pageNum)
+		if err == nil && strings.Contains(strings.ToLower(text), d.searchQuery) {
+			d.searchHits = append(d.searchHits, pageNum)
+		}
+	}
+
+	if len(d.searchHits) > 0 {
+		// Jump to first hit
+		for i, p := range d.textPages {
+			if p == d.searchHits[0] {
+				d.currentPage = i
+				break
+			}
+		}
+	}
+}
+
+func (d *DocumentViewer) nextSearchHit() {
+	if len(d.searchHits) == 0 {
+		return
+	}
+	d.searchHitIdx = (d.searchHitIdx + 1) % len(d.searchHits)
+	targetPage := d.searchHits[d.searchHitIdx]
+	for i, p := range d.textPages {
+		if p == targetPage {
+			d.currentPage = i
+			break
+		}
+	}
+}
+
+func (d *DocumentViewer) prevSearchHit() {
+	if len(d.searchHits) == 0 {
+		return
+	}
+	d.searchHitIdx--
+	if d.searchHitIdx < 0 {
+		d.searchHitIdx = len(d.searchHits) - 1
+	}
+	targetPage := d.searchHits[d.searchHitIdx]
+	for i, p := range d.textPages {
+		if p == targetPage {
+			d.currentPage = i
+			break
+		}
+	}
 }
 
 func (d *DocumentViewer) toggleViewMode() {
