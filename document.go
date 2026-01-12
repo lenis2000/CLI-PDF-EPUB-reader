@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gen2brain/go-fitz"
@@ -282,10 +283,19 @@ func (d *DocumentViewer) checkAndReload() bool {
 			lastSize = newInfo.Size()
 		}
 
-		// Try to open the new file (with retries)
+		// Try to open the new file (suppress stderr warnings from MuPDF)
 		savedPage := d.currentPage
 		var doc *fitz.Document
 		var openErr error
+
+		// Suppress stderr during PDF open attempts
+		devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		oldStderr := os.Stderr
+		if devNull != nil {
+			os.Stderr = devNull
+			syscall.Dup2(int(devNull.Fd()), 2)
+		}
+
 		for i := 0; i < 3; i++ {
 			doc, openErr = fitz.New(d.path)
 			if openErr == nil {
@@ -293,6 +303,14 @@ func (d *DocumentViewer) checkAndReload() bool {
 			}
 			time.Sleep(300 * time.Millisecond)
 		}
+
+		// Restore stderr
+		if devNull != nil {
+			os.Stderr = oldStderr
+			syscall.Dup2(int(oldStderr.Fd()), 2)
+			devNull.Close()
+		}
+
 		if openErr != nil {
 			return false // Still can't open, skip this reload
 		}
