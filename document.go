@@ -33,6 +33,8 @@ type DocumentViewer struct {
 	lastModTime  time.Time // for auto-reload detection
 	cellWidth    float64   // cached cell width in pixels
 	cellHeight   float64   // cached cell height in pixels
+	lastTermCols int       // last known terminal columns (for change detection)
+	lastTermRows int       // last known terminal rows (for change detection)
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -388,6 +390,12 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 		if d.scaleFactor < 0.1 {
 			d.scaleFactor = 0.1
 		}
+	case 'r':
+		// Refresh cell size (useful after resolution/monitor change)
+		d.refreshCellSize()
+	case 'd':
+		// Debug: show detected dimensions
+		d.showDebugInfo()
 	case 27: // ESC key (arrow keys handled in readSingleChar)
 		// Do nothing for plain ESC
 	}

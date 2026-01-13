@@ -35,6 +35,8 @@ go build -o docviewer . && mv docviewer ~/bin/
 - `t` - Toggle text/image mode
 - `f` - Cycle fit modes (height → width → auto)
 - `+`/`-` - Manual zoom (10% to 200%)
+- `r` - Refresh cell size (after resolution/monitor change)
+- `d` - Debug info (show detected dimensions)
 - `h` - Help
 - `q` - Quit
 
@@ -60,7 +62,14 @@ go build -o docviewer . && mv docviewer ~/bin/
 - Graceful degradation: keep showing current content if reload fails
 
 ### Terminal Cell Sizes (HiDPI)
-Tuned for Retina/HiDPI displays:
+**Dynamic detection** via `/dev/tty` (works in splits, pipes, etc.):
+1. Kitty escape sequence query (CSI 16 t) - most accurate
+2. TIOCGWINSZ ioctl for pixel dimensions
+3. Fallback hardcoded values per terminal type
+
+**Re-detection**: Cell size is re-detected when terminal dimensions change (resolution/monitor switch). Press `r` to force refresh, `d` for debug info.
+
+Fallback values for Retina/HiDPI:
 - Kitty: 18x36 pixels
 - WezTerm: 18x36 pixels
 - iTerm2: 16x32 pixels

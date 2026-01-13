@@ -398,6 +398,7 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println("  t           - Toggle view mode (auto → text → image)")
 	fmt.Println("  f           - Toggle fit mode (height → width → auto)")
 	fmt.Println("  +/-         - Zoom in/out (adjust scale)")
+	fmt.Println("  r           - Refresh display (re-detect cell size for resolution changes)")
 	fmt.Println("  h           - Show this help")
 	fmt.Println("  q           - Quit")
 	fmt.Println()
@@ -417,6 +418,24 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println("Supported formats: PDF, EPUB")
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", termWidth))
+	fmt.Println("Press any key to return...")
+	d.readSingleChar()
+}
+
+func (d *DocumentViewer) showDebugInfo() {
+	fmt.Print("\033[2J\033[H") // clear screen
+	cols, rows := d.getTerminalSize()
+	cellW, cellH := d.getTerminalCellSize()
+	pixelW, pixelH := d.getTerminalPixelSize()
+
+	fmt.Println("=== Debug Info ===")
+	fmt.Printf("Terminal size: %d cols x %d rows\n", cols, rows)
+	fmt.Printf("Cell size: %.1f x %.1f pixels\n", cellW, cellH)
+	fmt.Printf("Pixel size (TIOCGWINSZ): %d x %d\n", pixelW, pixelH)
+	fmt.Printf("Calculated terminal pixels: %.0f x %.0f\n", float64(cols)*cellW, float64(rows)*cellH)
+	fmt.Printf("Fit mode: %s\n", d.fitMode)
+	fmt.Printf("Scale factor: %.1f\n", d.scaleFactor)
+	fmt.Println()
 	fmt.Println("Press any key to return...")
 	d.readSingleChar()
 }

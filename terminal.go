@@ -12,11 +12,18 @@ import (
 )
 
 func (d *DocumentViewer) getTerminalSize() (int, int) {
-	width, height, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		return 80, 24 // Fallback default
+	// Try stdout first - it's connected to the correct PTY in Kitty splits
+	if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 && height > 0 {
+		return width, height
 	}
-	return width, height
+	// Fallback to /dev/tty
+	if tty, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0); err == nil {
+		defer tty.Close()
+		if width, height, err := term.GetSize(int(tty.Fd())); err == nil {
+			return width, height
+		}
+	}
+	return 80, 24 // Fallback default
 }
 
 // detecting Terminal
@@ -55,15 +62,45 @@ func (d *DocumentViewer) detectTerminalType() string {
 }
 
 func (d *DocumentViewer) getTerminalCellSize() (float64, float64) {
+	// Check if terminal dimensions changed (resolution/monitor switch)
+	cols, rows := d.getTerminalSize()
+	if cols != d.lastTermCols || rows != d.lastTermRows {
+		// Terminal changed - invalidate cache and re-detect
+		d.cellWidth = 0
+		d.cellHeight = 0
+		d.lastTermCols = cols
+		d.lastTermRows = rows
+	}
+
 	// Use cached values if available
 	if d.cellWidth > 0 && d.cellHeight > 0 {
 		return d.cellWidth, d.cellHeight
 	}
-	return d.detectCellSize()
+
+	// Detect and cache
+	d.cellWidth, d.cellHeight = d.detectCellSize()
+	return d.cellWidth, d.cellHeight
+}
+
+// refreshCellSize forces re-detection of cell size (useful after resolution change)
+func (d *DocumentViewer) refreshCellSize() {
+	d.cellWidth = 0
+	d.cellHeight = 0
+	d.lastTermCols = 0
+	d.lastTermRows = 0
 }
 
 // detectCellSize detects cell size - call before entering raw mode
 func (d *DocumentViewer) detectCellSize() (float64, float64) {
+	// Check for environment variable override first (most reliable for multi-resolution)
+	// Format: DOCVIEWER_CELL_SIZE=WxH (e.g., "12x26")
+	if cellSize := os.Getenv("DOCVIEWER_CELL_SIZE"); cellSize != "" {
+		var w, h float64
+		if _, err := fmt.Sscanf(cellSize, "%fx%f", &w, &h); err == nil && w > 0 && h > 0 {
+			return w, h
+		}
+	}
+
 	// Try Kitty-specific query first (most accurate)
 	if kw, kh := d.getKittyCellSize(); kw > 0 && kh > 0 {
 		return kw, kh
@@ -109,32 +146,64 @@ func (d *DocumentViewer) getTerminalPixelSize() (int, int) {
 		Ypixel uint16
 	}{}
 
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL,
+	// Try stdout first - correct PTY in Kitty splits
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
 		uintptr(syscall.Stdout),
 		uintptr(syscall.TIOCGWINSZ),
 		uintptr(unsafe.Pointer(&ws)))
 
-	if err == 0 && ws.Xpixel > 0 && ws.Ypixel > 0 {
+	if errno == 0 && ws.Xpixel > 0 && ws.Ypixel > 0 {
 		return int(ws.Xpixel), int(ws.Ypixel)
 	}
+
+	// Fallback to /dev/tty
+	tty, err := os.OpenFile("/dev/tty", os.O_RDONLY, 0)
+	if err == nil {
+		defer tty.Close()
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL,
+			uintptr(tty.Fd()),
+			uintptr(syscall.TIOCGWINSZ),
+			uintptr(unsafe.Pointer(&ws)))
+
+		if errno == 0 && ws.Xpixel > 0 && ws.Ypixel > 0 {
+			return int(ws.Xpixel), int(ws.Ypixel)
+		}
+	}
+
 	return 0, 0
 }
 
 // getKittyCellSize queries Kitty for actual cell size using escape sequence
+// Uses /dev/tty directly for reliable TTY access
 func (d *DocumentViewer) getKittyCellSize() (float64, float64) {
 	if d.detectTerminalType() != "kitty" {
 		return 0, 0
 	}
 
-	// Query cell size: CSI 16 t -> CSI 6 ; height ; width t
-	os.Stdout.WriteString("\x1b[16t")
-	os.Stdout.Sync()
+	// Open /dev/tty directly for reliable TTY access
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return 0, 0
+	}
+	defer tty.Close()
 
-	// Read response with timeout using goroutine
+	// Save terminal state and set raw mode for reading response
+	fd := int(tty.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return 0, 0
+	}
+	defer term.Restore(fd, oldState)
+
+	// Query cell size: CSI 16 t -> CSI 6 ; height ; width t
+	tty.WriteString("\x1b[16t")
+	tty.Sync()
+
+	// Read response with timeout
 	resultChan := make(chan string, 1)
 	go func() {
 		buf := make([]byte, 32)
-		n, _ := os.Stdin.Read(buf)
+		n, _ := tty.Read(buf)
 		if n > 0 {
 			resultChan <- string(buf[:n])
 		} else {
@@ -154,7 +223,7 @@ func (d *DocumentViewer) getKittyCellSize() (float64, float64) {
 				return float64(cellWidth), float64(cellHeight)
 			}
 		}
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 		// Timeout - terminal didn't respond
 	}
 
