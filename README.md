@@ -1,6 +1,6 @@
-# CLI PDF/EPUB Reader
+# CLI Document Viewer
 
-A terminal-based PDF and EPUB reader with fuzzy file search, high-resolution image rendering, auto-reload for LaTeX workflows, and intelligent text reflow.
+A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolution image rendering, auto-reload for LaTeX workflows, and intelligent text reflow.
 
 ## Screenshots
 
@@ -27,7 +27,7 @@ A terminal-based PDF and EPUB reader with fuzzy file search, high-resolution ima
 - **In-Document Search**: Search for text within documents
 - **Intelligent Text Reflow**: Automatically reformats text to fit your terminal width while preserving paragraphs
 - **Terminal-Aware**: Detects your terminal type and optimizes rendering accordingly
-- **Both Formats**: Supports PDF and EPUB documents
+- **Multiple Formats**: Supports PDF, EPUB, and DOCX documents
 
 ## Keyboard Shortcuts
 
@@ -44,6 +44,8 @@ A terminal-based PDF and EPUB reader with fuzzy file search, high-resolution ima
 | `f` | Cycle fit modes (height/width/auto) |
 | `+` / `=` | Zoom in |
 | `-` | Zoom out |
+| `r` | Refresh display (re-detect cell size) |
+| `d` | Show debug info |
 | `h` | Show help |
 | `q` | Quit |
 
@@ -69,14 +71,14 @@ mv docviewer ~/bin/
 ### Usage
 
 ```bash
-# Search all common directories
+# Search current directory (default)
 docviewer
-
-# Search only current directory
-docviewer .
 
 # Search specific directory
 docviewer ~/Documents/papers/
+
+# Open a specific file directly
+docviewer paper.pdf
 ```
 
 ## LaTeX Workflow
@@ -111,7 +113,7 @@ Works in any terminal, but image rendering quality depends on terminal capabilit
 
 ## How It Works
 
-The reader scans your home directory, Documents, Downloads, and Desktop for PDF/EPUB files (or just the specified directory). Use the fuzzy search to quickly filter and select a file. The viewer intelligently detects whether pages contain text, images, or both, and renders them appropriately for terminal display.
+The reader scans the current directory (or specified directory) for PDF, EPUB, and DOCX files. Use the fuzzy search to quickly filter and select a file. The viewer intelligently detects whether pages contain text, images, or both, and renders them appropriately for terminal display.
 
 PDFs are rendered as images by default (essential for math, diagrams, and formatted content) at a DPI calculated to match your terminal's pixel dimensions for optimal sharpness.
 

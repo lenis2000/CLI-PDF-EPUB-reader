@@ -8,6 +8,19 @@ import (
 )
 
 func main() {
+	// Handle --help and -h flags
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		if arg == "--help" || arg == "-h" {
+			printHelp()
+			return
+		}
+		if arg == "--version" || arg == "-v" {
+			fmt.Println("docviewer 1.0.0")
+			return
+		}
+	}
+
 	// Determine target: argument or current directory
 	arg := "."
 	if len(os.Args) > 1 {
@@ -78,6 +91,58 @@ func main() {
 		}
 		// Loop continues - go back to file picker
 	}
+}
+
+func printHelp() {
+	help := `docviewer - Terminal-based document viewer
+
+USAGE:
+    docviewer [OPTIONS] [PATH]
+
+ARGUMENTS:
+    [PATH]    File or directory to open (default: current directory)
+              - If a directory, opens file picker with fuzzy search
+              - If a file, opens it directly
+
+OPTIONS:
+    -h, --help       Show this help message
+    -v, --version    Show version
+
+SUPPORTED FORMATS:
+    PDF, EPUB, DOCX
+
+KEYBOARD SHORTCUTS:
+    Navigation:
+        j, Space, Down, Right    Next page
+        k, Up, Left              Previous page
+        g                        Go to specific page
+        b                        Back to file picker
+
+    Search:
+        /                        Search in document
+        n                        Next search result
+        N                        Previous search result
+
+    Display:
+        t                        Toggle view mode (auto/text/image)
+        f                        Cycle fit modes (height/width/auto)
+        +, =                     Zoom in
+        -                        Zoom out
+        r                        Refresh display (re-detect cell size)
+        d                        Show debug info
+
+    Other:
+        h                        Show help
+        q                        Quit
+
+EXAMPLES:
+    docviewer                    Search current directory
+    docviewer ~/Documents        Search specific directory
+    docviewer paper.pdf          Open file directly
+
+For LaTeX workflows, the viewer auto-reloads when the file changes.
+`
+	fmt.Print(help)
 }
 
 func selectFileWithPickerInDir(dir string) (string, error) {
