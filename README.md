@@ -50,6 +50,9 @@ Then in your `home.nix`:
     inputs.lnreader.packages.x86_64-linux.default
   ];
 }
+
+
+## Installation on any other distros
 ```
 
 1. Install the binary from the releases section:
@@ -69,7 +72,7 @@ go mod tidy
 go build -o lnreader
 ```
 
-```
+
 
 ## Dependencies
 
