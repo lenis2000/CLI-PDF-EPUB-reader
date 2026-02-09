@@ -165,6 +165,10 @@ func (d *DocumentViewer) displayImagePage(pageNum, termWidth, termHeight int) {
 		fmt.Print("  (Image rendering failed)")
 		imageHeight = 2
 	}
+	// Show search match position markers on the right edge
+	if d.searchQuery != "" && imageHeight > 0 {
+		d.drawSearchMarkers(pageNum, termWidth, verticalPadding, imageHeight)
+	}
 	for row := imageHeight + 1 + verticalPadding; row <= termHeight-reserved; row++ {
 		fmt.Printf("\033[%d;1H", row)
 		fmt.Print(strings.Repeat(" ", termWidth))
@@ -233,6 +237,40 @@ func (d *DocumentViewer) displayMixedPage(pageNum, termWidth, termHeight int) {
 	fmt.Print(strings.Repeat(" ", termWidth))
 	fmt.Printf("\033[%d;1H", termHeight)
 	d.displayPageInfo(pageNum, termWidth, "Image+Text")
+}
+
+func (d *DocumentViewer) drawSearchMarkers(pageNum, termWidth, topPadding, imageHeight int) {
+	text, err := d.doc.Text(pageNum)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	lines := strings.Split(text, "\n")
+	totalLines := len(lines)
+	if totalLines == 0 {
+		return
+	}
+
+	// Find which lines contain matches and map to unique terminal rows
+	markerRows := make(map[int]bool)
+	query := d.searchQuery
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), query) {
+			row := topPadding + 1 + int(float64(i)/float64(totalLines)*float64(imageHeight))
+			if row < topPadding+1 {
+				row = topPadding + 1
+			}
+			if row > topPadding+imageHeight {
+				row = topPadding + imageHeight
+			}
+			markerRows[row] = true
+		}
+	}
+
+	// Draw markers on the right edge
+	for row := range markerRows {
+		fmt.Printf("\033[%d;%dH", row, termWidth)
+		fmt.Print("\033[43m \033[0m") // yellow block
+	}
 }
 
 func (d *DocumentViewer) displayPageInfo(pageNum, termWidth int, contentType string) {
