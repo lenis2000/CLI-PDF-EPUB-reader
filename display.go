@@ -482,6 +482,7 @@ func (d *DocumentViewer) showHelp(inputChan <-chan byte) {
 	fmt.Println("  d                   - Show debug info")
 	fmt.Println("  S                   - Open in Skim")
 	fmt.Println("  P                   - Open in Preview")
+	fmt.Println("  O                   - Reveal in Finder")
 	fmt.Println("  h                   - Show this help")
 	fmt.Println("  q                   - Quit")
 	fmt.Println()

@@ -504,6 +504,9 @@ func (d *DocumentViewer) handleInput(c byte) int {
 		d.openInExternalApp("Skim")
 	case 'P':
 		d.openInExternalApp("Preview")
+	case 'O':
+		absPath, _ := filepath.Abs(d.path)
+		exec.Command("open", "-R", absPath).Start()
 	case 'd':
 		// Debug: show detected dimensions
 		return -4 // signal: show debug info
