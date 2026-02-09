@@ -42,17 +42,19 @@ func main() {
 
 	// Determine the search directory for "back" functionality
 	searchDir := arg
-	if !info.IsDir() {
+	isDir := info.IsDir()
+	if !isDir {
 		searchDir = filepath.Dir(arg)
 	}
 
 	// Main loop - allows going back to file picker
+	firstFile := true
 	for {
 		var filePath string
 		var err error
 
-		if info.IsDir() {
-			// It's a directory - search within it
+		if isDir || !firstFile {
+			// Search within directory
 			filePath, err = selectFileWithPickerInDir(searchDir)
 			if err != nil {
 				fmt.Printf("File selection cancelled: %v\n", err)
@@ -61,7 +63,7 @@ func main() {
 		} else {
 			// First time with a file - use directly, then switch to directory mode
 			filePath = arg
-			info = nil // Next iteration will use directory picker
+			firstFile = false
 		}
 
 		if filePath == "" {

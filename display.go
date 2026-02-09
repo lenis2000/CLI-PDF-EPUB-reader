@@ -89,6 +89,33 @@ func (d *DocumentViewer) getPageContentType(pageNum int) string {
 	}
 }
 
+func (d *DocumentViewer) highlightSearchMatches(line string) string {
+	if d.searchQuery == "" {
+		return line
+	}
+	lowerLine := strings.ToLower(line)
+	query := d.searchQuery // already lowercase
+	if !strings.Contains(lowerLine, query) {
+		return line
+	}
+
+	var result strings.Builder
+	pos := 0
+	for {
+		idx := strings.Index(lowerLine[pos:], query)
+		if idx < 0 {
+			result.WriteString(line[pos:])
+			break
+		}
+		result.WriteString(line[pos : pos+idx])
+		result.WriteString("\033[43;30m") // yellow bg, black text
+		result.WriteString(line[pos+idx : pos+idx+len(query)])
+		result.WriteString("\033[0m") // reset
+		pos += idx + len(query)
+	}
+	return result.String()
+}
+
 func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 	text, err := d.doc.Text(pageNum)
 	if err != nil {
@@ -105,7 +132,7 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 			break
 		}
 		fmt.Printf("\033[%d;1H", row)
-		fmt.Printf("  %s", line)
+		fmt.Printf("  %s", d.highlightSearchMatches(line))
 		row++
 		if i == len(reflowedLines)-1 {
 			break
@@ -181,7 +208,7 @@ func (d *DocumentViewer) displayMixedPage(pageNum, termWidth, termHeight int) {
 					break
 				}
 				fmt.Printf("\033[%d;1H", currentRow)
-				fmt.Printf("  %s", line)
+				fmt.Printf("  %s", d.highlightSearchMatches(line))
 				currentRow++
 				textLinesDisplayed++
 				if i == len(reflowedLines)-1 {
@@ -391,7 +418,7 @@ func (d *DocumentViewer) wrapText(text string, width int) []string {
 	return lines
 }
 
-func (d *DocumentViewer) showHelp() {
+func (d *DocumentViewer) showHelp(inputChan <-chan byte) {
 	fmt.Print("\033[2J\033[H") // clear screen
 	termWidth, _ := d.getTerminalSize()
 	fmt.Println(strings.Repeat("=", termWidth))
@@ -430,10 +457,10 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", termWidth))
 	fmt.Println("Press any key to return...")
-	d.readSingleChar()
+	<-inputChan
 }
 
-func (d *DocumentViewer) showDebugInfo() {
+func (d *DocumentViewer) showDebugInfo(inputChan <-chan byte) {
 	fmt.Print("\033[2J\033[H") // clear screen
 	cols, rows := d.getTerminalSize()
 	cellW, cellH := d.getTerminalCellSize()
@@ -448,5 +475,5 @@ func (d *DocumentViewer) showDebugInfo() {
 	fmt.Printf("Scale factor: %.1f\n", d.scaleFactor)
 	fmt.Println()
 	fmt.Println("Press any key to return...")
-	d.readSingleChar()
+	<-inputChan
 }

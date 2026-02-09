@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/md5"
 	"fmt"
 	"image"
@@ -20,7 +19,6 @@ type DocumentViewer struct {
 	doc         *fitz.Document
 	currentPage int
 	textPages   []int
-	reader      *bufio.Reader
 	path        string
 	oldState    *term.State
 	fileType    string // "pdf" or "epub"
@@ -50,7 +48,6 @@ func NewDocumentViewer(path string) *DocumentViewer {
 	return &DocumentViewer{
 		path:        path,
 		fileType:    fileType,
-		reader:      bufio.NewReader(os.Stdin),
 		tempDir:     tempDir,
 		fitMode:     "height", // default: fit to height
 		scaleFactor: 1.0,
@@ -259,9 +256,20 @@ func (d *DocumentViewer) Run() bool {
 		// Wait for input, page jump, or reload tick
 		select {
 		case char := <-inputChan:
-			if d.handleInput(char) {
+			action := d.handleInput(char)
+			if action == 1 {
 				fmt.Print("\033[2J\033[H")
 				return d.wantBack
+			}
+			switch action {
+			case -1:
+				d.startSearch(inputChan)
+			case -2:
+				d.goToPage(inputChan)
+			case -3:
+				d.showHelp(inputChan)
+			case -4:
+				d.showDebugInfo(inputChan)
 			}
 			d.displayCurrentPage()
 		case page := <-pageChan:
@@ -441,13 +449,14 @@ func (d *DocumentViewer) checkAndReload() bool {
 	return false
 }
 
-func (d *DocumentViewer) handleInput(c byte) bool {
+// handleInput returns: 0 = continue, 1 = quit, -1 = search, -2 = goto page
+func (d *DocumentViewer) handleInput(c byte) int {
 	switch c {
 	case 'q':
-		return true
+		return 1
 	case 'b':
 		d.wantBack = true
-		return true
+		return 1
 	case 'j', ' ':
 		if d.currentPage < len(d.textPages)-1 {
 			d.currentPage++
@@ -457,9 +466,9 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 			d.currentPage--
 		}
 	case 'g':
-		d.goToPage()
+		return -2 // signal: go to page
 	case 'h':
-		d.showHelp()
+		return -3 // signal: show help
 	case 't':
 		d.toggleViewMode()
 	case 'f':
@@ -472,7 +481,7 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 			d.fitMode = "height"
 		}
 	case '/':
-		d.startSearch()
+		return -1 // signal: start search
 	case 'n':
 		d.nextSearchHit()
 	case 'N':
@@ -492,29 +501,52 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 		d.refreshCellSize()
 	case 'd':
 		// Debug: show detected dimensions
-		d.showDebugInfo()
+		return -4 // signal: show debug info
 	case 27: // ESC key (arrow keys handled in readSingleChar)
 		// Do nothing for plain ESC
 	}
-	return false
+	return 0
 }
 
-func (d *DocumentViewer) startSearch() {
-	d.restoreTerminal(d.oldState)
-	fmt.Print("\033[?25h") // show cursor
-	fmt.Printf("\nSearch: ")
-	line, _ := d.reader.ReadString('\n')
-	query := strings.TrimSpace(line)
-	fmt.Print("\033[?25l") // hide cursor
-	d.setRawMode()
+func (d *DocumentViewer) startSearch(inputChan <-chan byte) {
+	_, rows := d.getTerminalSize()
+	fmt.Printf("\033[%d;1H\033[K", rows) // bottom line
+	fmt.Print("\033[?25h")                // show cursor
+	fmt.Print("Search: ")
 
-	if query == "" {
+	var query []byte
+	for {
+		ch := <-inputChan
+		switch ch {
+		case 13, 10: // Enter
+			goto done
+		case 27: // Escape - cancel
+			fmt.Print("\033[?25l")
+			return
+		case 127, 8: // Backspace
+			if len(query) > 0 {
+				query = query[:len(query)-1]
+				fmt.Printf("\033[%d;1H\033[K", rows)
+				fmt.Printf("Search: %s", string(query))
+			}
+		default:
+			if ch >= 32 && ch < 127 {
+				query = append(query, ch)
+				fmt.Printf("%c", ch)
+			}
+		}
+	}
+done:
+	fmt.Print("\033[?25l") // hide cursor
+	queryStr := strings.TrimSpace(string(query))
+
+	if queryStr == "" {
 		d.searchQuery = ""
 		d.searchHits = nil
 		return
 	}
 
-	d.searchQuery = strings.ToLower(query)
+	d.searchQuery = strings.ToLower(queryStr)
 	d.searchHits = nil
 	d.searchHitIdx = 0
 
@@ -580,15 +612,40 @@ func (d *DocumentViewer) toggleViewMode() {
 }
 
 
-func (d *DocumentViewer) goToPage() {
-	d.restoreTerminal(d.oldState)
-	fmt.Printf("\nGo to page (1-%d): ", len(d.textPages))
-	line, _ := d.reader.ReadString('\n')
+func (d *DocumentViewer) goToPage(inputChan <-chan byte) {
+	_, rows := d.getTerminalSize()
+	fmt.Printf("\033[%d;1H\033[K", rows)
+	fmt.Print("\033[?25h")
+	fmt.Printf("Go to page (1-%d): ", len(d.textPages))
+
+	var input []byte
+	for {
+		ch := <-inputChan
+		switch ch {
+		case 13, 10: // Enter
+			goto done
+		case 27: // Escape
+			fmt.Print("\033[?25l")
+			return
+		case 127, 8: // Backspace
+			if len(input) > 0 {
+				input = input[:len(input)-1]
+				fmt.Printf("\033[%d;1H\033[K", rows)
+				fmt.Printf("Go to page (1-%d): %s", len(d.textPages), string(input))
+			}
+		default:
+			if ch >= '0' && ch <= '9' {
+				input = append(input, ch)
+				fmt.Printf("%c", ch)
+			}
+		}
+	}
+done:
+	fmt.Print("\033[?25l")
 	var num int
-	if _, err := fmt.Sscanf(strings.TrimSpace(line), "%d", &num); err == nil {
+	if _, err := fmt.Sscanf(string(input), "%d", &num); err == nil {
 		if num >= 1 && num <= len(d.textPages) {
 			d.currentPage = num - 1
 		}
 	}
-	d.setRawMode()
 }
