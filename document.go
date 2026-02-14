@@ -1,12 +1,15 @@
 package main
 
 import (
-	"bufio"
+	"crypto/md5"
 	"fmt"
 	"image"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gen2brain/go-fitz"
@@ -17,11 +20,24 @@ type DocumentViewer struct {
 	doc         *fitz.Document
 	currentPage int
 	textPages   []int
-	reader      *bufio.Reader
 	path        string
 	oldState    *term.State
 	fileType    string // "pdf" or "epub"
 	tempDir     string // for storing temporary image files
+	forceMode   string // "", "text", or "image" - override auto-detection
+	fitMode      string  // "auto", "height", "width"
+	wantBack     bool    // signal to go back to file picker
+	searchQuery  string  // current search query
+	searchHits   []int     // pages with matches
+	searchHitIdx int       // current index in searchHits
+	scaleFactor  float64   // image scale adjustment (1.0 = default)
+	lastModTime  time.Time // for auto-reload detection
+	cellWidth    float64   // cached cell width in pixels
+	cellHeight   float64   // cached cell height in pixels
+	lastTermCols int       // last known terminal columns (for change detection)
+	lastTermRows int       // last known terminal rows (for change detection)
+	fifoPath     string    // path to FIFO for external page jump commands
+	skipClear    bool      // skip screen clear on next display (for smooth reload)
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -31,10 +47,11 @@ func NewDocumentViewer(path string) *DocumentViewer {
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("docviewer_%d", time.Now().UnixNano()))
 
 	return &DocumentViewer{
-		path:     path,
-		fileType: fileType,
-		reader:   bufio.NewReader(os.Stdin),
-		tempDir:  tempDir,
+		path:        path,
+		fileType:    fileType,
+		tempDir:     tempDir,
+		fitMode:     "height", // default: fit to height
+		scaleFactor: 1.0,
 	}
 }
 
@@ -44,6 +61,11 @@ func (d *DocumentViewer) Open() error {
 		return fmt.Errorf("error opening %s: %v", d.fileType, err)
 	}
 	d.doc = doc
+
+	// Store modification time for auto-reload
+	if info, err := os.Stat(d.path); err == nil {
+		d.lastModTime = info.ModTime()
+	}
 
 	d.findContentPages()
 	if len(d.textPages) == 0 {
@@ -180,39 +202,86 @@ func (d *DocumentViewer) checkColorVariance(img image.Image) float64 {
 	return rVar + gVar + bVar
 }
 
-func (d *DocumentViewer) Run() {
+func (d *DocumentViewer) Run() bool {
 	defer d.doc.Close()
 	defer d.cleanup()
 
-	fmt.Printf("Press any key to start reading %s, or 'q' to quit\n", strings.ToUpper(d.fileType))
-	input, _ := d.reader.ReadString('\n')
-	if strings.TrimSpace(input) == "q" {
-		return
-	}
+	// Cache cell size before entering raw mode (for Kitty query)
+	d.cellWidth, d.cellHeight = d.detectCellSize()
 
 	oldState, err := d.setRawMode()
 	if err != nil {
 		fmt.Printf("Error setting raw mode: %v\n", err)
-		return
+		return false
 	}
 	defer d.restoreTerminal(oldState)
 	fmt.Print("\033[?25l")
 	defer fmt.Print("\033[?25h") // Show cursor on exit
 
 	d.currentPage = 0
-	for {
-		d.displayCurrentPage()
-		char := d.readSingleChar()
 
-		if d.handleInput(char) {
-			break // Exit the loop to quit
+	// Channel for input from goroutine
+	inputChan := make(chan byte, 1)
+	stopChan := make(chan struct{})
+	defer close(stopChan)
+
+	// Channel for external page jump commands via FIFO
+	pageChan := make(chan int, 1)
+
+	// Set up FIFO for external control
+	d.setupFIFO()
+	defer d.cleanupFIFO()
+
+	// FIFO listener goroutine
+	go d.fifoListener(pageChan, stopChan)
+
+	// Input reader goroutine
+	go func() {
+		for {
+			char := d.readSingleChar()
+			select {
+			case <-stopChan:
+				return
+			case inputChan <- char:
+			}
 		}
+	}()
 
+	// Ticker for file change checking
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	d.displayCurrentPage()
+
+	for {
+		// Wait for input, page jump, or reload tick
+		select {
+		case char := <-inputChan:
+			action := d.handleInput(char)
+			if action == 1 {
+				fmt.Print("\033[2J\033[H")
+				return d.wantBack
+			}
+			switch action {
+			case -1:
+				d.startSearch(inputChan)
+			case -2:
+				d.goToPage(inputChan)
+			case -3:
+				d.showHelp(inputChan)
+			case -4:
+				d.showDebugInfo(inputChan)
+			}
+			d.displayCurrentPage()
+		case page := <-pageChan:
+			d.jumpToPage(page)
+			d.displayCurrentPage()
+		case <-ticker.C:
+			if d.checkAndReload() {
+				d.displayCurrentPage()
+			}
+		}
 	}
-
-	// Clear screen before showing exit message
-	fmt.Print("\033[2J\033[H")
-	fmt.Println("Thanks for reading!")
 }
 
 func (d *DocumentViewer) cleanup() {
@@ -221,10 +290,174 @@ func (d *DocumentViewer) cleanup() {
 	}
 }
 
-func (d *DocumentViewer) handleInput(c byte) bool {
+func (d *DocumentViewer) setupFIFO() {
+	// Create control file path based on absolute PDF path hash
+	absPath, _ := filepath.Abs(d.path)
+	hash := md5.Sum([]byte(absPath))
+	d.fifoPath = fmt.Sprintf("/tmp/docviewer_%x.ctrl", hash[:8])
+
+	// Remove existing file if present
+	os.Remove(d.fifoPath)
+}
+
+func (d *DocumentViewer) cleanupFIFO() {
+	if d.fifoPath != "" {
+		os.Remove(d.fifoPath)
+	}
+}
+
+func (d *DocumentViewer) fifoListener(pageChan chan<- int, stopChan <-chan struct{}) {
+	var lastMod time.Time
+
+	for {
+		select {
+		case <-stopChan:
+			return
+		default:
+		}
+
+		// Check if control file exists and was modified
+		info, err := os.Stat(d.fifoPath)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		if info.ModTime().After(lastMod) {
+			lastMod = info.ModTime()
+
+			data, err := os.ReadFile(d.fifoPath)
+			if err == nil {
+				line := strings.TrimSpace(string(data))
+				if page, err := strconv.Atoi(line); err == nil && page >= 1 {
+					select {
+					case pageChan <- page:
+					default:
+					}
+				}
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (d *DocumentViewer) jumpToPage(page int) {
+	// page is 1-indexed from external command
+	// Find the index in textPages that corresponds to this PDF page
+	targetPdfPage := page - 1 // Convert to 0-indexed PDF page
+
+	// First try exact match
+	for i, pdfPage := range d.textPages {
+		if pdfPage == targetPdfPage {
+			d.currentPage = i
+			return
+		}
+	}
+
+	// If exact page not in textPages, find closest page
+	for i, pdfPage := range d.textPages {
+		if pdfPage >= targetPdfPage {
+			d.currentPage = i
+			return
+		}
+	}
+
+	// If target is beyond all pages, go to last
+	if len(d.textPages) > 0 {
+		d.currentPage = len(d.textPages) - 1
+	}
+}
+
+func (d *DocumentViewer) checkAndReload() bool {
+	info, err := os.Stat(d.path)
+	if err != nil {
+		return false
+	}
+
+	if info.ModTime().After(d.lastModTime) {
+		// Update lastModTime immediately to avoid repeated attempts
+		d.lastModTime = info.ModTime()
+
+		// Wait for file to stabilize (not still being written)
+		lastSize := info.Size()
+		for i := 0; i < 5; i++ {
+			time.Sleep(100 * time.Millisecond)
+			newInfo, err := os.Stat(d.path)
+			if err != nil {
+				return false
+			}
+			if newInfo.Size() == lastSize && newInfo.Size() > 0 {
+				break
+			}
+			lastSize = newInfo.Size()
+		}
+
+		// Suppress stderr during PDF open
+		savedPage := d.currentPage
+		savedStderr, _ := syscall.Dup(2)
+		devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if devNull != nil && savedStderr != -1 {
+			syscall.Dup2(int(devNull.Fd()), 2)
+		}
+
+		doc, openErr := fitz.New(d.path)
+
+		// Restore stderr
+		if savedStderr != -1 {
+			syscall.Dup2(savedStderr, 2)
+			syscall.Close(savedStderr)
+		}
+		if devNull != nil {
+			devNull.Close()
+		}
+
+		if openErr != nil {
+			return false
+		}
+
+		// Check if new doc has valid pages before switching
+		oldDoc := d.doc
+		oldPages := d.textPages
+		oldPage := d.currentPage
+
+		d.doc = doc
+		d.findContentPages()
+
+		if len(d.textPages) == 0 {
+			// New doc is invalid/corrupted, keep old one
+			d.doc = oldDoc
+			d.textPages = oldPages
+			d.currentPage = oldPage
+			doc.Close()
+			return false
+		}
+
+		// New doc is good, close old one
+		oldDoc.Close()
+
+		// Restore page position (clamp to valid range)
+		if savedPage >= len(d.textPages) {
+			savedPage = len(d.textPages) - 1
+		}
+		if savedPage < 0 {
+			savedPage = 0
+		}
+		d.currentPage = savedPage
+		d.skipClear = true // Skip screen clear to avoid blink on reload
+		return true
+	}
+	return false
+}
+
+// handleInput returns: 0 = continue, 1 = quit, -1 = search, -2 = goto page
+func (d *DocumentViewer) handleInput(c byte) int {
 	switch c {
 	case 'q':
-		return true
+		return 1
+	case 'b':
+		d.wantBack = true
+		return 1
 	case 'j', ' ':
 		if d.currentPage < len(d.textPages)-1 {
 			d.currentPage++
@@ -234,50 +467,210 @@ func (d *DocumentViewer) handleInput(c byte) bool {
 			d.currentPage--
 		}
 	case 'g':
-		d.goToPage()
+		return -2 // signal: go to page
 	case 'h':
-		d.showHelp()
-	case 27: // ESC key - could be arrow keys
-		d.handleArrowKeys()
+		return -3 // signal: show help
+	case 't':
+		d.toggleViewMode()
+	case 'f':
+		switch d.fitMode {
+		case "height":
+			d.fitMode = "width"
+		case "width":
+			d.fitMode = "auto"
+		default:
+			d.fitMode = "height"
+		}
+	case '/':
+		return -1 // signal: start search
+	case 'n':
+		d.nextSearchHit()
+	case 'N':
+		d.prevSearchHit()
+	case '+', '=':
+		d.scaleFactor += 0.1
+		if d.scaleFactor > 2.0 {
+			d.scaleFactor = 2.0
+		}
+	case '-', '_':
+		d.scaleFactor -= 0.1
+		if d.scaleFactor < 0.1 {
+			d.scaleFactor = 0.1
+		}
+	case 'r':
+		// Refresh cell size (useful after resolution/monitor change)
+		d.refreshCellSize()
+	case 'S':
+		d.openInExternalApp("Skim")
+	case 'P':
+		d.openInExternalApp("Preview")
+	case 'O':
+		absPath, _ := filepath.Abs(d.path)
+		exec.Command("open", "-R", absPath).Start()
+	case 'd':
+		// Debug: show detected dimensions
+		return -4 // signal: show debug info
+	case 27: // ESC key (arrow keys handled in readSingleChar)
+		// Do nothing for plain ESC
 	}
-	return false
+	return 0
 }
 
-func (d *DocumentViewer) handleArrowKeys() {
-	buf := make([]byte, 2)
-	n, _ := os.Stdin.Read(buf)
+func (d *DocumentViewer) openInExternalApp(appName string) {
+	absPath, _ := filepath.Abs(d.path)
+	page := d.currentPage + 1 // convert 0-indexed to 1-indexed
+	exec.Command("open", "-a", appName, absPath).Start()
+	// Navigate to the current page after the app opens
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		switch appName {
+		case "Skim":
+			script := fmt.Sprintf(`tell application "Skim" to set index of current page of document 1 to %d`, page)
+			exec.Command("osascript", "-e", script).Run()
+		case "Preview":
+			// Preview has limited AppleScript support; just open the file
+		}
+	}()
+}
 
-	if n >= 2 && buf[0] == '[' {
-		switch buf[1] {
-		case 'B': // Down arrow
-			if d.currentPage > 0 {
-				d.currentPage--
+func (d *DocumentViewer) startSearch(inputChan <-chan byte) {
+	_, rows := d.getTerminalSize()
+	fmt.Printf("\033[%d;1H\033[K", rows) // bottom line
+	fmt.Print("\033[?25h")                // show cursor
+	fmt.Print("Search: ")
+
+	var query []byte
+	for {
+		ch := <-inputChan
+		switch ch {
+		case 13, 10: // Enter
+			goto done
+		case 27: // Escape - cancel
+			fmt.Print("\033[?25l")
+			return
+		case 127, 8: // Backspace
+			if len(query) > 0 {
+				query = query[:len(query)-1]
+				fmt.Printf("\033[%d;1H\033[K", rows)
+				fmt.Printf("Search: %s", string(query))
 			}
-		case 'A': // Up arrow
-			if d.currentPage < len(d.textPages)-1 {
-				d.currentPage++
+		default:
+			if ch >= 32 && ch < 127 {
+				query = append(query, ch)
+				fmt.Printf("%c", ch)
 			}
-		case 'C': // Right arrow
-			if d.currentPage < len(d.textPages)-1 {
-				d.currentPage++
-			}
-		case 'D': // Left arrow
-			if d.currentPage > 0 {
-				d.currentPage--
+		}
+	}
+done:
+	fmt.Print("\033[?25l") // hide cursor
+	queryStr := strings.TrimSpace(string(query))
+
+	if queryStr == "" {
+		d.searchQuery = ""
+		d.searchHits = nil
+		return
+	}
+
+	d.searchQuery = strings.ToLower(queryStr)
+	d.searchHits = nil
+	d.searchHitIdx = 0
+
+	// Search all pages
+	for _, pageNum := range d.textPages {
+		text, err := d.doc.Text(pageNum)
+		if err == nil && strings.Contains(strings.ToLower(text), d.searchQuery) {
+			d.searchHits = append(d.searchHits, pageNum)
+		}
+	}
+
+	if len(d.searchHits) > 0 {
+		// Jump to first hit
+		for i, p := range d.textPages {
+			if p == d.searchHits[0] {
+				d.currentPage = i
+				break
 			}
 		}
 	}
 }
 
-func (d *DocumentViewer) goToPage() {
-	d.restoreTerminal(d.oldState)
-	fmt.Printf("\nGo to page (1-%d): ", len(d.textPages))
-	line, _ := d.reader.ReadString('\n')
+func (d *DocumentViewer) nextSearchHit() {
+	if len(d.searchHits) == 0 {
+		return
+	}
+	d.searchHitIdx = (d.searchHitIdx + 1) % len(d.searchHits)
+	targetPage := d.searchHits[d.searchHitIdx]
+	for i, p := range d.textPages {
+		if p == targetPage {
+			d.currentPage = i
+			break
+		}
+	}
+}
+
+func (d *DocumentViewer) prevSearchHit() {
+	if len(d.searchHits) == 0 {
+		return
+	}
+	d.searchHitIdx--
+	if d.searchHitIdx < 0 {
+		d.searchHitIdx = len(d.searchHits) - 1
+	}
+	targetPage := d.searchHits[d.searchHitIdx]
+	for i, p := range d.textPages {
+		if p == targetPage {
+			d.currentPage = i
+			break
+		}
+	}
+}
+
+func (d *DocumentViewer) toggleViewMode() {
+	switch d.forceMode {
+	case "":
+		d.forceMode = "text"
+	case "text":
+		d.forceMode = "image"
+	case "image":
+		d.forceMode = ""
+	}
+}
+
+
+func (d *DocumentViewer) goToPage(inputChan <-chan byte) {
+	_, rows := d.getTerminalSize()
+	fmt.Printf("\033[%d;1H\033[K", rows)
+	fmt.Print("\033[?25h")
+	fmt.Printf("Go to page (1-%d): ", len(d.textPages))
+
+	var input []byte
+	for {
+		ch := <-inputChan
+		switch ch {
+		case 13, 10: // Enter
+			goto done
+		case 27: // Escape
+			fmt.Print("\033[?25l")
+			return
+		case 127, 8: // Backspace
+			if len(input) > 0 {
+				input = input[:len(input)-1]
+				fmt.Printf("\033[%d;1H\033[K", rows)
+				fmt.Printf("Go to page (1-%d): %s", len(d.textPages), string(input))
+			}
+		default:
+			if ch >= '0' && ch <= '9' {
+				input = append(input, ch)
+				fmt.Printf("%c", ch)
+			}
+		}
+	}
+done:
+	fmt.Print("\033[?25l")
 	var num int
-	if _, err := fmt.Sscanf(strings.TrimSpace(line), "%d", &num); err == nil {
+	if _, err := fmt.Sscanf(string(input), "%d", &num); err == nil {
 		if num >= 1 && num <= len(d.textPages) {
 			d.currentPage = num - 1
 		}
 	}
-	d.setRawMode()
 }

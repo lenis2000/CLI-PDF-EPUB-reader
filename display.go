@@ -10,12 +10,24 @@ import (
 func (d *DocumentViewer) displayCurrentPage() {
 	termWidth, termHeight := d.getTerminalSize()
 	actualPage := d.textPages[d.currentPage]
-	fmt.Print("\033[2J")
-	fmt.Print("\033[3J")
-	fmt.Print("\033[H")
+
+	// Begin synchronized update (Kitty) - buffers output for atomic display
+	fmt.Print("\033[?2026h")
+
+	if d.skipClear {
+		// Reload case: delete Kitty images, move home, overwrite
+		fmt.Print("\033_Ga=d,d=A\033\\") // Delete all Kitty images
+		fmt.Print("\033[H")              // Move cursor home
+		d.skipClear = false
+	} else {
+		// Normal case: full screen clear
+		fmt.Print("\033[2J")
+		fmt.Print("\033[3J")
+		fmt.Print("\033[H")
+	}
 	fmt.Print("\033[1G")
 	fmt.Print("\033[0m")
-	os.Stdout.Sync()
+
 	contentType := d.getPageContentType(actualPage)
 	switch contentType {
 	case "text":
@@ -28,10 +40,30 @@ func (d *DocumentViewer) displayCurrentPage() {
 		d.displayTextPage(actualPage, termWidth, termHeight)
 	}
 	fmt.Print("\033[9999;1H")
+
+	// End synchronized update - display everything at once
+	fmt.Print("\033[?2026l")
 	os.Stdout.Sync()
 }
 
 func (d *DocumentViewer) getPageContentType(pageNum int) string {
+	// Honor forced mode if set (toggled with 't')
+	if d.forceMode == "text" {
+		return "text"
+	}
+	if d.forceMode == "image" {
+		return "image"
+	}
+
+	// For PDFs, prefer image rendering - it's more faithful to the original
+	// especially for math, diagrams, and formatted content
+	if d.fileType == "pdf" {
+		if d.pageHasVisualContent(pageNum) {
+			return "image"
+		}
+	}
+
+	// For EPUBs or PDFs without visual content, use text-based logic
 	text, err := d.doc.Text(pageNum)
 	hasText := err == nil && len(strings.Fields(strings.TrimSpace(text))) >= 3
 	textWordCount := 0
@@ -57,6 +89,33 @@ func (d *DocumentViewer) getPageContentType(pageNum int) string {
 	}
 }
 
+func (d *DocumentViewer) highlightSearchMatches(line string) string {
+	if d.searchQuery == "" {
+		return line
+	}
+	lowerLine := strings.ToLower(line)
+	query := d.searchQuery // already lowercase
+	if !strings.Contains(lowerLine, query) {
+		return line
+	}
+
+	var result strings.Builder
+	pos := 0
+	for {
+		idx := strings.Index(lowerLine[pos:], query)
+		if idx < 0 {
+			result.WriteString(line[pos:])
+			break
+		}
+		result.WriteString(line[pos : pos+idx])
+		result.WriteString("\033[43;30m") // yellow bg, black text
+		result.WriteString(line[pos+idx : pos+idx+len(query)])
+		result.WriteString("\033[0m") // reset
+		pos += idx + len(query)
+	}
+	return result.String()
+}
+
 func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 	text, err := d.doc.Text(pageNum)
 	if err != nil {
@@ -73,7 +132,7 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 			break
 		}
 		fmt.Printf("\033[%d;1H", row)
-		fmt.Printf("  %s", line)
+		fmt.Printf("  %s", d.highlightSearchMatches(line))
 		row++
 		if i == len(reflowedLines)-1 {
 			break
@@ -105,6 +164,10 @@ func (d *DocumentViewer) displayImagePage(pageNum, termWidth, termHeight int) {
 		fmt.Print("\033[3;1H")
 		fmt.Print("  (Image rendering failed)")
 		imageHeight = 2
+	}
+	// Show search match position markers on the right edge
+	if d.searchQuery != "" && imageHeight > 0 {
+		d.drawSearchMarkers(pageNum, termWidth, verticalPadding, imageHeight)
 	}
 	for row := imageHeight + 1 + verticalPadding; row <= termHeight-reserved; row++ {
 		fmt.Printf("\033[%d;1H", row)
@@ -149,7 +212,7 @@ func (d *DocumentViewer) displayMixedPage(pageNum, termWidth, termHeight int) {
 					break
 				}
 				fmt.Printf("\033[%d;1H", currentRow)
-				fmt.Printf("  %s", line)
+				fmt.Printf("  %s", d.highlightSearchMatches(line))
 				currentRow++
 				textLinesDisplayed++
 				if i == len(reflowedLines)-1 {
@@ -176,12 +239,63 @@ func (d *DocumentViewer) displayMixedPage(pageNum, termWidth, termHeight int) {
 	d.displayPageInfo(pageNum, termWidth, "Image+Text")
 }
 
+func (d *DocumentViewer) drawSearchMarkers(pageNum, termWidth, topPadding, imageHeight int) {
+	text, err := d.doc.Text(pageNum)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	lines := strings.Split(text, "\n")
+	totalLines := len(lines)
+	if totalLines == 0 {
+		return
+	}
+
+	// Find which lines contain matches and map to unique terminal rows
+	markerRows := make(map[int]bool)
+	query := d.searchQuery
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), query) {
+			row := topPadding + 1 + int(float64(i)/float64(totalLines)*float64(imageHeight))
+			if row < topPadding+1 {
+				row = topPadding + 1
+			}
+			if row > topPadding+imageHeight {
+				row = topPadding + imageHeight
+			}
+			markerRows[row] = true
+		}
+	}
+
+	// Draw markers on the right edge
+	for row := range markerRows {
+		fmt.Printf("\033[%d;%dH", row, termWidth)
+		fmt.Print("\033[43m \033[0m") // yellow block
+	}
+}
+
 func (d *DocumentViewer) displayPageInfo(pageNum, termWidth int, contentType string) {
+	modeIndicator := ""
+	if d.forceMode != "" {
+		modeIndicator = fmt.Sprintf(" [%s]", d.forceMode)
+	}
+	fitIndicator := fmt.Sprintf(" [fit:%s]", d.fitMode)
+	scaleIndicator := ""
+	if d.scaleFactor != 1.0 {
+		scaleIndicator = fmt.Sprintf(" [%.0f%%]", d.scaleFactor*100)
+	}
+	searchIndicator := ""
+	if d.searchQuery != "" {
+		if len(d.searchHits) > 0 {
+			searchIndicator = fmt.Sprintf(" [/%s: %d/%d]", d.searchQuery, d.searchHitIdx+1, len(d.searchHits))
+		} else {
+			searchIndicator = fmt.Sprintf(" [/%s: no matches]", d.searchQuery)
+		}
+	}
 	var pageInfo string
 	if d.fileType == "epub" {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s) - EPUB", d.currentPage+1, len(d.textPages), contentType)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s%s%s - EPUB", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator, scaleIndicator, searchIndicator)
 	} else {
-		pageInfo = fmt.Sprintf("Page %d/%d (%s) - PDF", d.currentPage+1, len(d.textPages), contentType)
+		pageInfo = fmt.Sprintf("Page %d/%d (%s)%s%s%s%s - PDF", d.currentPage+1, len(d.textPages), contentType, modeIndicator, fitIndicator, scaleIndicator, searchIndicator)
 	}
 	if len(pageInfo) > termWidth {
 		pageInfo = pageInfo[:termWidth-3] + "..."
@@ -342,7 +456,7 @@ func (d *DocumentViewer) wrapText(text string, width int) []string {
 	return lines
 }
 
-func (d *DocumentViewer) showHelp() {
+func (d *DocumentViewer) showHelp(inputChan <-chan byte) {
 	fmt.Print("\033[2J\033[H") // clear screen
 	termWidth, _ := d.getTerminalSize()
 	fmt.Println(strings.Repeat("=", termWidth))
@@ -350,28 +464,57 @@ func (d *DocumentViewer) showHelp() {
 	fmt.Println(strings.Repeat("=", termWidth))
 	fmt.Println()
 	fmt.Println("Navigation:")
-	fmt.Println("  j or Space  - Next page/chapter")
-	fmt.Println("  k           - Previous page/chapter")
-	fmt.Println("  g           - Go to specific page/chapter")
-	fmt.Println("  h           - Show this help")
-	fmt.Println("  q           - Quit")
+	fmt.Println("  j/Space/Down/Right  - Next page")
+	fmt.Println("  k/Up/Left           - Previous page")
+	fmt.Println("  g                   - Go to specific page")
+	fmt.Println("  b                   - Back to file list")
+	fmt.Println()
+	fmt.Println("Search:")
+	fmt.Println("  /                   - Search text in document")
+	fmt.Println("  n                   - Next search result")
+	fmt.Println("  N                   - Previous search result")
+	fmt.Println()
+	fmt.Println("Display:")
+	fmt.Println("  t                   - Toggle view mode (auto/text/image)")
+	fmt.Println("  f                   - Cycle fit mode (height/width/auto)")
+	fmt.Println("  +/-                 - Zoom in/out (10%-200%)")
+	fmt.Println("  r                   - Refresh cell size (after resolution change)")
+	fmt.Println("  d                   - Show debug info")
+	fmt.Println("  S                   - Open in Skim")
+	fmt.Println("  P                   - Open in Preview")
+	fmt.Println("  O                   - Reveal in Finder")
+	fmt.Println("  h                   - Show this help")
+	fmt.Println("  q                   - Quit")
 	fmt.Println()
 	fmt.Println("Features:")
+	fmt.Println("  - Auto-reload when file changes (for LaTeX workflows)")
 	fmt.Println("  - Text is reflowed to fit terminal width")
-	fmt.Println("  - Images are rendered using high-resolution terminal graphics (Sixel/Kitty/etc)")
-	fmt.Println("  - Pages with text, images, or both are shown")
-	fmt.Println("  - Paragraphs are preserved with proper spacing")
+	fmt.Println("  - Images rendered via Kitty/Sixel/iTerm2 graphics")
 	if d.fileType == "epub" {
 		fmt.Println("  - HTML entities are converted to readable text")
 	}
 	fmt.Println()
-	fmt.Println("Requirements:")
-
-	fmt.Println("  - Terminal with truecolor support recommended")
-	fmt.Println()
-	fmt.Println("Supported formats: PDF, EPUB")
+	fmt.Println("Supported formats: PDF, EPUB, DOCX")
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", termWidth))
 	fmt.Println("Press any key to return...")
-	d.readSingleChar()
+	<-inputChan
+}
+
+func (d *DocumentViewer) showDebugInfo(inputChan <-chan byte) {
+	fmt.Print("\033[2J\033[H") // clear screen
+	cols, rows := d.getTerminalSize()
+	cellW, cellH := d.getTerminalCellSize()
+	pixelW, pixelH := d.getTerminalPixelSize()
+
+	fmt.Println("=== Debug Info ===")
+	fmt.Printf("Terminal size: %d cols x %d rows\n", cols, rows)
+	fmt.Printf("Cell size: %.1f x %.1f pixels\n", cellW, cellH)
+	fmt.Printf("Pixel size (TIOCGWINSZ): %d x %d\n", pixelW, pixelH)
+	fmt.Printf("Calculated terminal pixels: %.0f x %.0f\n", float64(cols)*cellW, float64(rows)*cellH)
+	fmt.Printf("Fit mode: %s\n", d.fitMode)
+	fmt.Printf("Scale factor: %.1f\n", d.scaleFactor)
+	fmt.Println()
+	fmt.Println("Press any key to return...")
+	<-inputChan
 }

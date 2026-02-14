@@ -1,6 +1,6 @@
-# CLI PDF/EPUB Reader
+# CLI Document Viewer
 
-A terminal-based PDF and EPUB reader with fuzzy file search, high-resolution image rendering, and intelligent text reflow.
+A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolution image rendering, auto-reload for LaTeX workflows, and intelligent text reflow.
 
 ## Screenshots
 
@@ -17,23 +17,42 @@ A terminal-based PDF and EPUB reader with fuzzy file search, high-resolution ima
 ## Features
 
 - **Fuzzy File Search**: Interactive file picker with fuzzy search to quickly find your PDFs and EPUBs
+- **Directory Search**: Pass a directory argument to search only within that folder (`docviewer .`)
 - **Smart Content Detection**: Automatically detects and displays text, images, or mixed content pages
 - **High-Resolution Image Rendering**: Uses terminal graphics protocols (Sixel/Kitty/iTerm2) for crisp image display
+- **HiDPI/Retina Support**: Dynamic cell size detection for sharp rendering on high-DPI displays
+- **Auto-Reload**: Automatically reloads when the PDF changes (perfect for LaTeX compilation with `latexmk -pvc`)
+- **Fit Modes**: Toggle between height-fit, width-fit, and auto-fit modes
+- **Manual Zoom**: Adjust zoom from 10% to 200%
+- **In-Document Search**: Search for text within documents
 - **Intelligent Text Reflow**: Automatically reformats text to fit your terminal width while preserving paragraphs
 - **Terminal-Aware**: Detects your terminal type and optimizes rendering accordingly
-- **Both Formats**: Supports PDF and EPUB documents
+- **Multiple Formats**: Supports PDF, EPUB, and DOCX documents
 
-## Navigation
+## Keyboard Shortcuts
 
-- `j` or `Space` - Next page
-- `k` - Previous page  
-- `g` - Go to specific page
-- `h` - Show help
-- `q` - Quit
+| Key | Action |
+|-----|--------|
+| `j` / `Space` / `Down` / `Right` | Next page |
+| `k` / `Up` / `Left` | Previous page |
+| `g` | Go to specific page |
+| `b` | Back to file picker |
+| `/` | Search in document |
+| `n` | Next search result |
+| `N` | Previous search result |
+| `t` | Toggle text/image/auto mode |
+| `f` | Cycle fit modes (height/width/auto) |
+| `+` / `=` | Zoom in |
+| `-` | Zoom out |
+| `r` | Refresh display (re-detect cell size) |
+| `d` | Show debug info |
+| `h` | Show help |
+| `q` | Quit |
 
 ## Installation
 
-## Installation on NixOS
+### NixOS
+
 Add to your `flake.nix` inputs:
 ```nix
 {
@@ -50,43 +69,60 @@ Then in your `home.nix`:
     inputs.lnreader.packages.x86_64-linux.default
   ];
 }
-
-
-## Installation on any other distros
 ```
 
-1. Install the binary from the releases section:
+### Building from source
 
-2. Run the binary:
 ```bash
-./lnreader
-```
-
-**Building from source** (optional):
-```bash
-
-1. Clone this repository:
-git clone https://github.com/Yujonpradhananga/CLI-PDF-EPUB-reader.git
+# Clone this repository
+git clone https://github.com/lenis2000/CLI-PDF-EPUB-reader.git
 cd CLI-PDF-EPUB-reader
+
+# Install dependencies
 go mod tidy
-go build -o lnreader
+
+# Build
+go build -o docviewer .
+
+# Optionally move to your PATH
+mv docviewer ~/bin/
 ```
 
+### Usage
 
+```bash
+# Search current directory (default)
+docviewer
+
+# Search specific directory
+docviewer ~/Documents/papers/
+
+# Open a specific file directly
+docviewer paper.pdf
+```
+
+## LaTeX Workflow
+
+The auto-reload feature makes this viewer ideal for LaTeX editing:
+
+1. Open your PDF: `docviewer paper.pdf`
+2. Run LaTeX compiler in another terminal: `latexmk -pvc paper.tex`
+3. The viewer automatically reloads when the PDF updates, preserving your page position
+
+The viewer handles partially-written PDFs gracefully, waiting for the file to stabilize before reloading.
 
 ## Dependencies
 
 - Go 1.21+
-- [go-fitz](https://github.com/gen2brain/go-fitz) - PDF/EPUB parsing
+- [go-fitz](https://github.com/gen2brain/go-fitz) - PDF/EPUB parsing (MuPDF)
 - [go-termimg](https://github.com/blacktop/go-termimg) - Terminal image rendering
-- [imaging](https://github.com/disintegration/imaging) - Image processing
 - [fuzzy](https://github.com/sahilm/fuzzy) - Fuzzy search
 - [golang.org/x/term](https://golang.org/x/term) - Terminal control
 
 ## Supported Terminals
 
 Optimized for terminals with graphics support:
-- Kitty
+- **Kitty** (recommended) - Native cell size detection via escape sequences
 - WezTerm
 - iTerm2
 - Alacritty
@@ -97,7 +133,9 @@ Works in any terminal, but image rendering quality depends on terminal capabilit
 
 ## How It Works
 
-The reader scans your home directory, Documents, Downloads, and Desktop for PDF/EPUB files. Use the fuzzy search to quickly filter and select a file. The viewer intelligently detects whether pages contain text, images, or both, and renders them appropriately for terminal display.
+The reader scans the current directory (or specified directory) for PDF, EPUB, and DOCX files. Use the fuzzy search to quickly filter and select a file. The viewer intelligently detects whether pages contain text, images, or both, and renders them appropriately for terminal display.
+
+PDFs are rendered as images by default (essential for math, diagrams, and formatted content) at a DPI calculated to match your terminal's pixel dimensions for optimal sharpness.
 
 ## License
 
@@ -105,4 +143,4 @@ MIT
 
 ---
 
-Made with ❤️ by [Yujon Pradhananga](https://github.com/Yujonpradhananga)
+Fork of [CLI-PDF-EPUB-reader](https://github.com/Yujonpradhananga/CLI-PDF-EPUB-reader) by [Yujon Pradhananga](https://github.com/Yujonpradhananga)
