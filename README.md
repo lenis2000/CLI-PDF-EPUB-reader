@@ -1,4 +1,4 @@
-# CLI Document Viewer
+# CLI pdf-cli
 
 A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolution image rendering, auto-reload for LaTeX workflows, and intelligent text reflow.
 
@@ -17,7 +17,7 @@ A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolut
 ## Features
 
 - **Fuzzy File Search**: Interactive file picker with fuzzy search to quickly find your PDFs and EPUBs
-- **Directory Search**: Pass a directory argument to search only within that folder (`docviewer .`)
+- **Directory Search**: Pass a directory argument to search only within that folder (`pdf-cli .`)
 - **Smart Content Detection**: Automatically detects and displays text, images, or mixed content pages
 - **High-Resolution Image Rendering**: Uses terminal graphics protocols (Sixel/Kitty/iTerm2) for crisp image display
 - **HiDPI/Retina Support**: Dynamic cell size detection for sharp rendering on high-DPI displays
@@ -54,6 +54,7 @@ A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolut
 ### NixOS
 
 Add to your `flake.nix` inputs:
+
 ```nix
 {
   inputs = {
@@ -63,6 +64,7 @@ Add to your `flake.nix` inputs:
 ```
 
 Then in your `home.nix`:
+
 ```nix
 { inputs, pkgs, ... }: {
   home.packages = [
@@ -82,30 +84,30 @@ cd CLI-PDF-EPUB-reader
 go mod tidy
 
 # Build
-go build -o docviewer .
+go build -o pdf-cli .
 
 # Optionally move to your PATH
-mv docviewer ~/bin/
+mv pdf-cli ~/bin/
 ```
 
 ### Usage
 
 ```bash
 # Search current directory (default)
-docviewer
+pdf-cli
 
 # Search specific directory
-docviewer ~/Documents/papers/
+pdf-cli ~/Documents/papers/
 
 # Open a specific file directly
-docviewer paper.pdf
+pdf-cli paper.pdf
 ```
 
 ## LaTeX Workflow
 
 The auto-reload feature makes this viewer ideal for LaTeX editing:
 
-1. Open your PDF: `docviewer paper.pdf`
+1. Open your PDF: `pdf-cli paper.pdf`
 2. Run LaTeX compiler in another terminal: `latexmk -pvc paper.tex`
 3. The viewer automatically reloads when the PDF updates, preserving your page position
 
@@ -122,6 +124,7 @@ The viewer handles partially-written PDFs gracefully, waiting for the file to st
 ## Supported Terminals
 
 Optimized for terminals with graphics support:
+
 - **Kitty** (recommended) - Native cell size detection via escape sequences
 - WezTerm
 - iTerm2
@@ -143,4 +146,4 @@ MIT
 
 ---
 
-Fork of [CLI-PDF-EPUB-reader](https://github.com/Yujonpradhananga/CLI-PDF-EPUB-reader) by [Yujon Pradhananga](https://github.com/Yujonpradhananga)
+By [Yujon Pradhananga](https://github.com/Yujonpradhananga)
