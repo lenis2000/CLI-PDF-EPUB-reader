@@ -14,7 +14,8 @@ func (d *DocumentViewer) renderPageImage(pageNum, maxWidth, maxHeight int) int {
 		return 0
 	}
 
-	imagePath, actualHeight, imageWidthInChars, err := d.savePageAsImage(pageNum, maxWidth, maxHeight)
+	termType := d.detectTerminalType()
+	imagePath, actualHeight, imageWidthInChars, actualPixelWidth, actualPixelHeight, err := d.savePageAsImage(pageNum, maxWidth, maxHeight, termType)
 	if err != nil {
 		return 0
 	}
@@ -25,12 +26,12 @@ func (d *DocumentViewer) renderPageImage(pageNum, maxWidth, maxHeight int) int {
 		horizontalOffset = 0
 	}
 
-	return d.renderWithTermImg(imagePath, actualHeight, horizontalOffset, imageWidthInChars)
+	return d.renderWithTermImg(imagePath, actualHeight, horizontalOffset, imageWidthInChars, actualPixelWidth, actualPixelHeight, termType)
 }
 
-func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (string, int, int, error) {
+func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int, termType string) (string, int, int, int, int, error) {
 	if err := os.MkdirAll(d.tempDir, 0o755); err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, 0, 0, err
 	}
 
 	pixelsPerChar, pixelsPerLine := d.getTerminalCellSize()
@@ -53,7 +54,7 @@ func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (st
 	// Get page dimensions at 72 DPI to calculate proper render DPI
 	testImg, err := d.doc.ImageDPI(pageNum, 72.0)
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, 0, 0, err
 	}
 	testBounds := testImg.Bounds()
 	pageWidthAt72 := testBounds.Dx()
@@ -91,17 +92,24 @@ func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (st
 	}
 
 	// Clamp DPI to reasonable range
+	// Sixel terminals (Foot) are slower, so use lower max DPI for better performance
 	if dpi < 36 {
 		dpi = 36
 	}
-	if dpi > 300 {
-		dpi = 300
+	maxDPI := 300.0
+	if termType != "kitty" {
+		// Sixel terminals: reduce max DPI significantly for faster rendering
+		// 100 DPI is still very readable while being much faster to encode
+		maxDPI = 100.0
+	}
+	if dpi > maxDPI {
+		dpi = maxDPI
 	}
 
 	// Render at calculated DPI - no resizing needed
 	img, err := d.doc.ImageDPI(pageNum, dpi)
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, 0, 0, err
 	}
 
 	bounds := img.Bounds()
@@ -120,20 +128,20 @@ func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (st
 
 	file, err := os.Create(imagePath)
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, 0, 0, err
 	}
 	defer file.Close()
 
 	err = png.Encode(file, img)
 	if err != nil {
 		os.Remove(imagePath)
-		return "", 0, 0, err
+		return "", 0, 0, 0, 0, err
 	}
 
-	return imagePath, actualLines, imageWidthInChars, nil
+	return imagePath, actualLines, imageWidthInChars, actualWidth, actualHeight, nil
 }
 
-func (d *DocumentViewer) renderWithTermImg(imagePath string, estimatedLines int, horizontalOffset int, widthChars int) int {
+func (d *DocumentViewer) renderWithTermImg(imagePath string, estimatedLines int, horizontalOffset int, widthChars int, pixelWidth int, pixelHeight int, termType string) int {
 	if horizontalOffset > 0 {
 		fmt.Printf("\033[%dC", horizontalOffset) // Move cursor right
 	}
@@ -144,8 +152,17 @@ func (d *DocumentViewer) renderWithTermImg(imagePath string, estimatedLines int,
 		return 0
 	}
 
-	// Use ScaleNone - we already rendered at the correct size
-	err = img.Width(widthChars).Height(estimatedLines).Scale(termimg.ScaleNone).Print()
+	// Choose rendering strategy based on terminal type:
+	// - Kitty uses native graphics protocol with character-based dimensions
+	// - Sixel terminals need pixel-based dimensions for proper scaling
+	if termType == "kitty" {
+		// Kitty: use character-based dimensions with ScaleNone
+		err = img.Width(widthChars).Height(estimatedLines).Scale(termimg.ScaleNone).Print()
+	} else {
+		// Sixel terminals (Foot, xterm, etc.): use pixel-based dimensions with ScaleFit
+		err = img.WidthPixels(pixelWidth).HeightPixels(pixelHeight).Scale(termimg.ScaleFit).Print()
+	}
+
 	if err != nil {
 		return 0
 	}
