@@ -19,13 +19,11 @@ type FileResult struct {
 
 type FileSearcher struct {
 	files []string
-	cache map[string][]string
 }
 
 func NewFileSearcher() *FileSearcher {
 	return &FileSearcher{
 		files: []string{},
-		cache: make(map[string][]string),
 	}
 }
 
@@ -35,97 +33,108 @@ func (fs *FileSearcher) ScanDirectories() error {
 		return err
 	}
 
-	// Common directories
+	// Common directories to search
 	searchDirs := []string{
 		homeDir,
 		filepath.Join(homeDir, "Documents"),
 		filepath.Join(homeDir, "Downloads"),
 		filepath.Join(homeDir, "Desktop"),
 		".", // Current directory
-	}
-
-	customDirs := []string{
 		"/usr/share/doc",
 		filepath.Join(homeDir, ".local/share/books"),
 	}
-	searchDirs = append(searchDirs, customDirs...)
 
 	fmt.Println("Scanning for PDF and EPUB files...")
 	fmt.Println("This may take a moment on first run...")
 
-	allFiles := make(map[string]bool)
-
+	// Collect all files from all directories
+	var allFiles []string
 	for _, dir := range searchDirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
 		}
 
-		files := fs.scanDirectory(dir, 3) // Max depth of 3
-		for _, file := range files {
-			allFiles[file] = true
-		}
+		// Use filepath.Walk for simple, straightforward directory traversal
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+
+			// Skip hidden files and directories
+			if strings.HasPrefix(filepath.Base(path), ".") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			// Skip common large directories
+			if info.IsDir() && (info.Name() == "node_modules" || info.Name() == "vendor") {
+				return filepath.SkipDir
+			}
+
+			// Only collect supported files
+			if !info.IsDir() {
+				ext := strings.ToLower(filepath.Ext(path))
+				if ext == ".pdf" || ext == ".epub" || ext == ".docx" {
+					allFiles = append(allFiles, path)
+				}
+			}
+
+			return nil
+		})
 	}
 
-	fs.files = make([]string, 0, len(allFiles))
-	for file := range allFiles {
-		fs.files = append(fs.files, file)
-	}
-
+	fs.files = allFiles
 	fmt.Printf("Found %d files\n\n", len(fs.files))
 	return nil
 }
 
-// ScanDirectory scans a single directory for PDF/EPUB files (quiet mode)
+// ScanDirectory scans a single directory for PDF/EPUB/DOCX files
 func (fs *FileSearcher) ScanDirectory(dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
 
-	files := fs.scanDirectory(absDir, 10)
-	fs.files = files
-	return nil
-}
+	var files []string
 
-func (fs *FileSearcher) scanDirectory(dir string, maxDepth int) []string {
-	if maxDepth <= 0 {
-		return nil
-	}
-
-	if cached, ok := fs.cache[dir]; ok {
-		return cached
-	}
-
-	var results []string
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		if entry.Name() == "node_modules" || entry.Name() == "vendor" {
-			continue
+	// Use filepath.Walk for simple directory traversal
+	err = filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
 		}
 
-		fullPath := filepath.Join(dir, entry.Name())
+		// Skip hidden files and directories
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
-		if entry.IsDir() {
-			subResults := fs.scanDirectory(fullPath, maxDepth-1)
-			results = append(results, subResults...)
-		} else {
-			ext := strings.ToLower(filepath.Ext(entry.Name()))
+		// Skip common large directories
+		if info.IsDir() && (info.Name() == "node_modules" || info.Name() == "vendor") {
+			return filepath.SkipDir
+		}
+
+		// Only collect supported files
+		if !info.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
 			if ext == ".pdf" || ext == ".epub" || ext == ".docx" {
-				results = append(results, fullPath)
+				files = append(files, path)
 			}
 		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
-	fs.cache[dir] = results
-	return results
+	fs.files = files
+	return nil
 }
 
 func (fs *FileSearcher) Search(query string) []FileResult {
