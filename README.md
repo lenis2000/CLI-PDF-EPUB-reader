@@ -17,7 +17,6 @@ A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolut
 ## Features
 
 - **Fuzzy File Search**: Interactive file picker with fuzzy search to quickly find your PDFs and EPUBs
-- **Directory Search**: Pass a directory argument to search only within that folder (`pdf-cli .`)
 - **Smart Content Detection**: Automatically detects and displays text, images, or mixed content pages
 - **High-Resolution Image Rendering**: Uses terminal graphics protocols (Sixel/Kitty/iTerm2) for crisp image display
 - **HiDPI/Retina Support**: Dynamic cell size detection for sharp rendering on high-DPI displays
@@ -53,7 +52,7 @@ A terminal-based PDF, EPUB, and DOCX viewer with fuzzy file search, high-resolut
 
 ### NixOSNixOS Installation
 
-Add `pdf-cli.nix` to your nixos configuration directory, then add the overlay to your `flake.nix`:
+Add the `pdf-cli.nix` file to your nixos configuration directory, then add the overlay to your `flake.nix`:
 
 ```nix
 let
@@ -83,8 +82,8 @@ home.packages = with pkgs; [
 
 ```bash
 # Clone this repository
-git clone https://github.com/lenis2000/CLI-PDF-EPUB-reader.git
-cd CLI-PDF-EPUB-reader
+git clone https://github.com/Yujonpradhananga/pdf-cli
+cd pdf-cli
 
 # Install dependencies
 go mod tidy
@@ -93,7 +92,7 @@ go mod tidy
 go build -o pdf-cli .
 
 # Optionally move to your PATH
-mv pdf-cli ~/bin/
+mv pdf-cli ~/local/bin/
 ```
 
 ### Usage
