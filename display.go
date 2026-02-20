@@ -28,6 +28,14 @@ func (d *DocumentViewer) displayCurrentPage() {
 	fmt.Print("\033[1G")
 	fmt.Print("\033[0m")
 
+	if d.dualPageMode != "" {
+		d.displayDualPage(termWidth, termHeight)
+		fmt.Print("\033[9999;1H")
+		fmt.Print("\033[?2026l")
+		os.Stdout.Sync()
+		return
+	}
+
 	contentType := d.getPageContentType(actualPage)
 	switch contentType {
 	case "text":
@@ -544,4 +552,136 @@ func (d *DocumentViewer) showDebugInfo(inputChan <-chan byte) {
 	fmt.Println()
 	fmt.Println("Press any key to return...")
 	<-inputChan
+}
+
+func (d *DocumentViewer) displayDualPage(termWidth, termHeight int) {
+	page1 := d.textPages[d.currentPage]
+	hasPage2 := d.currentPage+1 < len(d.textPages)
+
+	reserved := 2 // status bar
+
+	if d.dualPageMode == "vertical" {
+		d.displayDualVertical(page1, hasPage2, termWidth, termHeight, reserved)
+	} else {
+		d.displayDualHorizontal(page1, hasPage2, termWidth, termHeight, reserved)
+	}
+}
+
+func (d *DocumentViewer) displayDualVertical(page1 int, hasPage2 bool, termWidth, termHeight, reserved int) {
+	availableHeight := termHeight - reserved
+	halfHeight := availableHeight / 2
+
+	// Render page 1 in top half
+	fmt.Print("\033[1;1H")
+	imgHeight1 := d.renderPageImage(page1, termWidth, halfHeight)
+	if imgHeight1 <= 0 {
+		fmt.Print("\033[1;1H")
+		fmt.Printf("  [Page %d - render failed]", page1+1)
+		imgHeight1 = 1
+	}
+
+	// Render page 2 in bottom half
+	startRow2 := halfHeight + 1
+	fmt.Printf("\033[%d;1H", startRow2)
+
+	if hasPage2 {
+		page2 := d.textPages[d.currentPage+1]
+		imgHeight2 := d.renderPageImage(page2, termWidth, halfHeight)
+		if imgHeight2 <= 0 {
+			fmt.Printf("  [Page %d - render failed]", page2+1)
+		}
+	} else {
+		fmt.Print("  [End of document]")
+	}
+
+	// Clear remaining lines
+	clearStart := termHeight - reserved + 1
+	for row := clearStart; row < termHeight; row++ {
+		fmt.Printf("\033[%d;1H\033[K", row)
+	}
+
+	// Status bar
+	fmt.Printf("\033[%d;1H", termHeight)
+	d.displayDualPageInfo(page1, hasPage2, termWidth, "2pg-v")
+}
+
+func (d *DocumentViewer) displayDualHorizontal(page1 int, hasPage2 bool, termWidth, termHeight, reserved int) {
+	availableHeight := termHeight - reserved
+	halfWidth := termWidth / 2
+
+	// Render page 1 on left half
+	fmt.Print("\033[1;1H")
+	imgHeight1 := d.renderPageImage(page1, halfWidth, availableHeight)
+	if imgHeight1 <= 0 {
+		fmt.Print("\033[1;1H")
+		fmt.Printf("  [Page %d - render failed]", page1+1)
+	}
+
+	// Render page 2 on right half
+	fmt.Printf("\033[1;%dH", halfWidth+1)
+
+	if hasPage2 {
+		page2 := d.textPages[d.currentPage+1]
+		imgHeight2 := d.renderPageImage(page2, halfWidth, availableHeight)
+		if imgHeight2 <= 0 {
+			fmt.Printf("  [Page %d - render failed]", page2+1)
+		}
+	} else {
+		fmt.Print("  [End of document]")
+	}
+
+	// Status bar
+	fmt.Printf("\033[%d;1H", termHeight)
+	d.displayDualPageInfo(page1, hasPage2, termWidth, "2pg-h")
+}
+
+func (d *DocumentViewer) displayDualPageInfo(page1 int, hasPage2 bool, termWidth int, modeLabel string) {
+	page1Num := d.currentPage + 1
+	page2Num := page1Num + 1
+	totalPages := len(d.textPages)
+
+	var pageRange string
+	if hasPage2 {
+		pageRange = fmt.Sprintf("Pages %d-%d/%d", page1Num, page2Num, totalPages)
+	} else {
+		pageRange = fmt.Sprintf("Page %d/%d", page1Num, totalPages)
+	}
+
+	fitIndicator := fmt.Sprintf(" [fit:%s]", d.fitMode)
+	scaleIndicator := ""
+	if d.isReflowable {
+		zoomPct := 595 * 100 / d.htmlPageWidth
+		scaleIndicator = fmt.Sprintf(" [zoom:%d%%]", zoomPct)
+	} else if d.scaleFactor != 1.0 {
+		scaleIndicator = fmt.Sprintf(" [%.0f%%]", d.scaleFactor*100)
+	}
+	darkIndicator := ""
+	switch d.darkMode {
+	case "smart":
+		darkIndicator = " [dark]"
+	case "invert":
+		darkIndicator = " [dark:inv]"
+	}
+	searchIndicator := ""
+	if d.searchQuery != "" {
+		if len(d.searchHits) > 0 {
+			searchIndicator = fmt.Sprintf(" [/%s: %d/%d]", d.searchQuery, d.searchHitIdx+1, len(d.searchHits))
+		} else {
+			searchIndicator = fmt.Sprintf(" [/%s: no matches]", d.searchQuery)
+		}
+	}
+
+	typeLabel := strings.ToUpper(d.fileType)
+	pageInfo := fmt.Sprintf("%s (Image) [%s]%s%s%s%s - %s",
+		pageRange, modeLabel, fitIndicator, scaleIndicator, darkIndicator, searchIndicator, typeLabel)
+
+	if len(pageInfo) > termWidth {
+		pageInfo = pageInfo[:termWidth-3] + "..."
+	}
+	if len(pageInfo) < termWidth {
+		padding := (termWidth - len(pageInfo)) / 2
+		fmt.Printf("%s%s", strings.Repeat(" ", padding), pageInfo)
+	} else {
+		fmt.Print(pageInfo)
+	}
 }
