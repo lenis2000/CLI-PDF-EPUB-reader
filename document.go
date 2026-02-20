@@ -524,7 +524,7 @@ func (d *DocumentViewer) handleInput(c byte) int {
 		}
 	case 'g':
 		return -2 // signal: go to page
-	case 'h':
+	case 'h', '?':
 		return -3 // signal: show help
 	case 't':
 		d.toggleViewMode()

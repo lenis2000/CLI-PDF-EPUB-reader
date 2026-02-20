@@ -492,47 +492,53 @@ func (d *DocumentViewer) wrapText(text string, width int) []string {
 func (d *DocumentViewer) showHelp(inputChan <-chan byte) {
 	fmt.Print("\033[2J\033[H") // clear screen
 	termWidth, _ := d.getTerminalSize()
-	fmt.Println(strings.Repeat("=", termWidth))
-	fmt.Printf("%s Viewer Help\n", strings.ToUpper(d.fileType))
-	fmt.Println(strings.Repeat("=", termWidth))
-	fmt.Println()
-	fmt.Println("Navigation:")
-	fmt.Println("  j/Space/Down/Right  - Next page")
-	fmt.Println("  k/Up/Left           - Previous page")
-	fmt.Println("  g                   - Go to specific page")
-	fmt.Println("  b                   - Back to file list")
-	fmt.Println()
-	fmt.Println("Search:")
-	fmt.Println("  /                   - Search text in document")
-	fmt.Println("  n                   - Next search result")
-	fmt.Println("  N                   - Previous search result")
-	fmt.Println()
-	fmt.Println("Display:")
-	fmt.Println("  t                   - Toggle view mode (auto/text/image)")
-	fmt.Println("  f                   - Cycle fit mode (height/width/auto)")
-	fmt.Println("  i                   - Toggle dark mode (smart invert, preserves hue)")
-	fmt.Println("  D                   - Toggle dark mode (simple color invert)")
-	fmt.Println("  +/-                 - Zoom in/out (10%-200%)")
-	fmt.Println("  r                   - Refresh cell size (after resolution change)")
-	fmt.Println("  d                   - Show debug info")
-	fmt.Println("  S                   - Open in Skim")
-	fmt.Println("  P                   - Open in Preview")
-	fmt.Println("  O                   - Reveal in Finder")
-	fmt.Println("  h                   - Show this help")
-	fmt.Println("  q                   - Quit")
-	fmt.Println()
-	fmt.Println("Features:")
-	fmt.Println("  - Auto-reload when file changes (for LaTeX workflows)")
-	fmt.Println("  - Text is reflowed to fit terminal width")
-	fmt.Println("  - Images rendered via Kitty/Sixel/iTerm2 graphics")
+
+	// Helper: print line with \r\n for raw mode
+	p := func(s string) { fmt.Print(s + "\r\n") }
+
+	p(strings.Repeat("=", termWidth))
+	p(fmt.Sprintf("%s Viewer Help", strings.ToUpper(d.fileType)))
+	p(strings.Repeat("=", termWidth))
+	p("")
+	p("Navigation:")
+	p("  j/Space/Down/Right  - Next page")
+	p("  k/Up/Left           - Previous page")
+	p("  g                   - Go to specific page")
+	p("  b                   - Back to file list")
+	p("")
+	p("Search:")
+	p("  /                   - Search text in document")
+	p("  n                   - Next search result")
+	p("  N                   - Previous search result")
+	p("")
+	p("Display:")
+	p("  t                   - Toggle view mode (auto/text/image)")
+	p("  f                   - Cycle fit mode (height/width/auto)")
+	p("  i                   - Toggle dark mode (smart invert, preserves hue)")
+	p("  D                   - Toggle dark mode (simple color invert)")
+	p("  +/-                 - Zoom in/out (10%-200%)")
+	p("  2                   - Cycle dual page (off/vertical/horizontal)")
+	p("  Shift+Left/Right    - Jump 2 pages (in dual page mode)")
+	p("  r                   - Refresh cell size (after resolution change)")
+	p("  d                   - Show debug info")
+	p("  S                   - Open in Skim")
+	p("  P                   - Open in Preview")
+	p("  O                   - Reveal in Finder")
+	p("  h or ?              - Show this help")
+	p("  q                   - Quit")
+	p("")
+	p("Features:")
+	p("  - Auto-reload when file changes (for LaTeX workflows)")
+	p("  - Text is reflowed to fit terminal width")
+	p("  - Images rendered via Kitty/Sixel/iTerm2 graphics")
 	if d.fileType == "epub" {
-		fmt.Println("  - HTML entities are converted to readable text")
+		p("  - HTML entities are converted to readable text")
 	}
-	fmt.Println()
-	fmt.Println("Supported formats: PDF, EPUB, DOCX, HTML")
-	fmt.Println()
-	fmt.Println(strings.Repeat("=", termWidth))
-	fmt.Println("Press any key to return...")
+	p("")
+	p("Supported formats: PDF, EPUB, DOCX, HTML")
+	p("")
+	p(strings.Repeat("=", termWidth))
+	p("Press any key to return...")
 	<-inputChan
 }
 
@@ -542,15 +548,16 @@ func (d *DocumentViewer) showDebugInfo(inputChan <-chan byte) {
 	cellW, cellH := d.getTerminalCellSize()
 	pixelW, pixelH := d.getTerminalPixelSize()
 
-	fmt.Println("=== Debug Info ===")
-	fmt.Printf("Terminal size: %d cols x %d rows\n", cols, rows)
-	fmt.Printf("Cell size: %.1f x %.1f pixels\n", cellW, cellH)
-	fmt.Printf("Pixel size (TIOCGWINSZ): %d x %d\n", pixelW, pixelH)
-	fmt.Printf("Calculated terminal pixels: %.0f x %.0f\n", float64(cols)*cellW, float64(rows)*cellH)
-	fmt.Printf("Fit mode: %s\n", d.fitMode)
-	fmt.Printf("Scale factor: %.1f\n", d.scaleFactor)
-	fmt.Println()
-	fmt.Println("Press any key to return...")
+	p := func(s string) { fmt.Print(s + "\r\n") }
+	p("=== Debug Info ===")
+	p(fmt.Sprintf("Terminal size: %d cols x %d rows", cols, rows))
+	p(fmt.Sprintf("Cell size: %.1f x %.1f pixels", cellW, cellH))
+	p(fmt.Sprintf("Pixel size (TIOCGWINSZ): %d x %d", pixelW, pixelH))
+	p(fmt.Sprintf("Calculated terminal pixels: %.0f x %.0f", float64(cols)*cellW, float64(rows)*cellH))
+	p(fmt.Sprintf("Fit mode: %s", d.fitMode))
+	p(fmt.Sprintf("Scale factor: %.1f", d.scaleFactor))
+	p("")
+	p("Press any key to return...")
 	<-inputChan
 }
 
@@ -580,6 +587,11 @@ func (d *DocumentViewer) displayDualVertical(page1 int, hasPage2 bool, termWidth
 		imgHeight1 = 1
 	}
 
+	// Clear gap between page 1 image and page 2 start
+	for row := imgHeight1 + 1; row <= halfHeight; row++ {
+		fmt.Printf("\033[%d;1H\033[K", row)
+	}
+
 	// Render page 2 in bottom half
 	startRow2 := halfHeight + 1
 	fmt.Printf("\033[%d;1H", startRow2)
@@ -602,7 +614,7 @@ func (d *DocumentViewer) displayDualVertical(page1 int, hasPage2 bool, termWidth
 
 	// Status bar
 	fmt.Printf("\033[%d;1H", termHeight)
-	d.displayDualPageInfo(page1, hasPage2, termWidth, "2pg-v")
+	d.displayDualPageInfo(hasPage2, termWidth, "2pg-v")
 }
 
 func (d *DocumentViewer) displayDualHorizontal(page1 int, hasPage2 bool, termWidth, termHeight, reserved int) {
@@ -632,10 +644,10 @@ func (d *DocumentViewer) displayDualHorizontal(page1 int, hasPage2 bool, termWid
 
 	// Status bar
 	fmt.Printf("\033[%d;1H", termHeight)
-	d.displayDualPageInfo(page1, hasPage2, termWidth, "2pg-h")
+	d.displayDualPageInfo(hasPage2, termWidth, "2pg-h")
 }
 
-func (d *DocumentViewer) displayDualPageInfo(page1 int, hasPage2 bool, termWidth int, modeLabel string) {
+func (d *DocumentViewer) displayDualPageInfo(hasPage2 bool, termWidth int, modeLabel string) {
 	page1Num := d.currentPage + 1
 	page2Num := page1Num + 1
 	totalPages := len(d.textPages)
