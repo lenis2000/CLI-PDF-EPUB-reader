@@ -40,7 +40,7 @@ type DocumentViewer struct {
 	skipClear     bool   // skip screen clear on next display (for smooth reload)
 	htmlPageWidth int    // virtual page width in points for HTML layout (wider = smaller text)
 	isReflowable  bool   // true for HTML (supports layout adjustment)
-	darkMode      bool   // smart-invert colors for dark mode
+	darkMode      string // "": off, "smart": HSL invert, "invert": simple RGB invert
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -573,7 +573,17 @@ func (d *DocumentViewer) handleInput(c byte) int {
 		absPath, _ := filepath.Abs(d.path)
 		exec.Command("open", "-R", absPath).Start()
 	case 'i':
-		d.darkMode = !d.darkMode
+		if d.darkMode == "smart" {
+			d.darkMode = ""
+		} else {
+			d.darkMode = "smart"
+		}
+	case 'D':
+		if d.darkMode == "invert" {
+			d.darkMode = ""
+		} else {
+			d.darkMode = "invert"
+		}
 	case 'd':
 		// Debug: show detected dimensions
 		return -4 // signal: show debug info

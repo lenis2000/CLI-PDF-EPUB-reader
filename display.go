@@ -127,9 +127,9 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 	reserved := 2
 	available := termHeight - reserved
 
-	// Dark mode: white text on black background
-	if d.darkMode {
-		fmt.Print("\033[37;40m") // white fg, black bg
+	// Dark mode: white text on dark gray background
+	if d.darkMode != "" {
+		fmt.Print("\033[38;2;255;255;255m\033[48;2;30;30;30m")
 	}
 
 	row := 1
@@ -138,7 +138,7 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 			break
 		}
 		fmt.Printf("\033[%d;1H", row)
-		if d.darkMode {
+		if d.darkMode != "" {
 			fmt.Printf("\033[K  %s", d.highlightSearchMatches(line))
 		} else {
 			fmt.Printf("  %s", d.highlightSearchMatches(line))
@@ -150,7 +150,7 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 	}
 	for row <= available {
 		fmt.Printf("\033[%d;1H", row)
-		if d.darkMode {
+		if d.darkMode != "" {
 			fmt.Print("\033[K")
 		} else {
 			fmt.Print(strings.Repeat(" ", termWidth))
@@ -158,7 +158,7 @@ func (d *DocumentViewer) displayTextPage(pageNum, termWidth, termHeight int) {
 		row++
 	}
 
-	if d.darkMode {
+	if d.darkMode != "" {
 		fmt.Print("\033[0m") // reset colors
 	}
 	fmt.Printf("\033[%d;1H", termHeight-1)
@@ -306,8 +306,11 @@ func (d *DocumentViewer) displayPageInfo(pageNum, termWidth int, contentType str
 		scaleIndicator = fmt.Sprintf(" [%.0f%%]", d.scaleFactor*100)
 	}
 	darkIndicator := ""
-	if d.darkMode {
+	switch d.darkMode {
+	case "smart":
 		darkIndicator = " [dark]"
+	case "invert":
+		darkIndicator = " [dark:inv]"
 	}
 	searchIndicator := ""
 	if d.searchQuery != "" {
@@ -499,7 +502,8 @@ func (d *DocumentViewer) showHelp(inputChan <-chan byte) {
 	fmt.Println("Display:")
 	fmt.Println("  t                   - Toggle view mode (auto/text/image)")
 	fmt.Println("  f                   - Cycle fit mode (height/width/auto)")
-	fmt.Println("  i                   - Toggle dark mode (smart invert)")
+	fmt.Println("  i                   - Toggle dark mode (smart invert, preserves hue)")
+	fmt.Println("  D                   - Toggle dark mode (simple color invert)")
 	fmt.Println("  +/-                 - Zoom in/out (10%-200%)")
 	fmt.Println("  r                   - Refresh cell size (after resolution change)")
 	fmt.Println("  d                   - Show debug info")

@@ -107,10 +107,13 @@ func (d *DocumentViewer) savePageAsImage(pageNum, termWidth, termHeight int) (st
 		return "", 0, 0, err
 	}
 
-	// Apply dark mode (smart invert: flip lightness, preserve hue)
+	// Apply dark mode
 	var finalImg image.Image = img
-	if d.darkMode {
+	switch d.darkMode {
+	case "smart":
 		finalImg = smartInvert(img)
+	case "invert":
+		finalImg = simpleInvert(img)
 	}
 
 	bounds := finalImg.Bounds()
@@ -176,13 +179,36 @@ func smartInvert(src image.Image) image.Image {
 			b8 := float64(b>>8) / 255.0
 
 			h, s, l := rgbToHSL(r8, g8, b8)
-			l = 1.0 - l // invert lightness
+			l = 0.12 + (1.0-l)*0.88 // invert lightness; dark gray bg instead of pure black
 			nr, ng, nb := hslToRGB(h, s, l)
 
 			dst.Set(x, y, color.RGBA{
 				R: uint8(nr * 255),
 				G: uint8(ng * 255),
 				B: uint8(nb * 255),
+				A: uint8(a >> 8),
+			})
+		}
+	}
+	return dst
+}
+
+// simpleInvert does a full RGB color inversion with the same gray background shift.
+func simpleInvert(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := src.At(x, y).RGBA()
+			// Invert and remap to gray bg range: 255→30, 0→255
+			nr := 30 + (255-r>>8)*225/255
+			ng := 30 + (255-g>>8)*225/255
+			nb := 30 + (255-b>>8)*225/255
+			dst.Set(x, y, color.RGBA{
+				R: uint8(nr),
+				G: uint8(ng),
+				B: uint8(nb),
 				A: uint8(a >> 8),
 			})
 		}
