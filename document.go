@@ -41,6 +41,7 @@ type DocumentViewer struct {
 	htmlPageWidth int    // virtual page width in points for HTML layout (wider = smaller text)
 	isReflowable  bool   // true for HTML (supports layout adjustment)
 	darkMode      string // "": off, "smart": HSL invert, "invert": simple RGB invert
+	dualPageMode  string // "": off, "vertical": stacked, "horizontal": side-by-side
 }
 
 func NewDocumentViewer(path string) *DocumentViewer {
@@ -587,6 +588,31 @@ func (d *DocumentViewer) handleInput(c byte) int {
 	case 'd':
 		// Debug: show detected dimensions
 		return -4 // signal: show debug info
+	case '2':
+		switch d.dualPageMode {
+		case "":
+			d.dualPageMode = "vertical"
+		case "vertical":
+			d.dualPageMode = "horizontal"
+		default:
+			d.dualPageMode = ""
+		}
+	case 'J': // Shift+Down/Right: jump 2 pages (in dual mode)
+		if d.dualPageMode != "" {
+			if d.currentPage < len(d.textPages)-2 {
+				d.currentPage += 2
+			} else if d.currentPage < len(d.textPages)-1 {
+				d.currentPage = len(d.textPages) - 1
+			}
+		}
+	case 'K': // Shift+Up/Left: jump back 2 pages (in dual mode)
+		if d.dualPageMode != "" {
+			if d.currentPage >= 2 {
+				d.currentPage -= 2
+			} else {
+				d.currentPage = 0
+			}
+		}
 	case 27: // ESC key (arrow keys handled in readSingleChar)
 		// Do nothing for plain ESC
 	}
